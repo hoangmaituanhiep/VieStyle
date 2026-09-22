@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'DTPhudu';
+  src: url('./components/font/DTPhudu-Light.woff2') format('woff2'),
+       url('./components/font/DTPhudu-Light.woff') format('woff'),
+       url('./components/font/DTPhudu-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DTPhudu';
+  src: url('./components/font/DTPhudu-Regular.woff2') format('woff2'),
+       url('./components/font/DTPhudu-Regular.woff') format('woff'),
+       url('./components/font/DTPhudu-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DTPhudu';
+  src: url('./components/font/DTPhudu-Medium.woff2') format('woff2'),
+       url('./components/font/DTPhudu-Medium.woff') format('woff'),
+       url('./components/font/DTPhudu-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DTPhudu';
+  src: url('./components/font/DTPhudu-Bold.woff2') format('woff2'),
+       url('./components/font/DTPhudu-Bold.woff') format('woff'),
+       url('./components/font/DTPhudu-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DTPhudu';
+  src: url('./components/font/DTPhudu-Black.woff2') format('woff2'),
+       url('./components/font/DTPhudu-Black.woff') format('woff'),
+       url('./components/font/DTPhudu-Black.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: 'DTPhudu', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'DTPhudu', serif;
+  --font-mono: 'DTPhudu', monospace;
+}
+
+@layer base {
+  :root {
+    --bg-ivory: #FAF7F2;
+    --card-surface: #FFFFFF;
+    --card-subtle: #F6F2EA;
+    --accent-red: #8B1E1E;
+    --accent-red-hover: #721616;
+    --accent-gold: #C5A059;
+    --accent-gold-hover: #AA853D;
+    --text-primary: #141210;
+    --text-secondary: #59534B;
+    --text-muted: #8A8277;
+    --border-light: #EBE4D8;
+    font-family: 'DTPhudu', sans-serif;
+  }
+
+  *, *::before, *::after {
+    font-family: 'DTPhudu', sans-serif;
+  }
+
+  body {
+    background-color: #FAF7F2;
+    color: #141210;
+    font-family: 'DTPhudu', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-serif, .font-sans, .font-mono, input, button, textarea, select {
+    font-family: 'DTPhudu', sans-serif;
+  }
+}
+
+/* Custom smooth scrollbar for warm aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F4EFE5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D8CEBD;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #BFAEA0;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "VieStyle - Outfit Recommendation Website",
+  "description": "AI-powered outfit recommendation celebrating traditional and contemporary Vietnamese garments (Áo Dài, Nhật Bình, Áo Tứ Thân, Ngũ Thân) matched with personal aesthetic preferences and cultural events.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
