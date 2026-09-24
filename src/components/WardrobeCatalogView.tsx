@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, Eye, Sparkles } from 'lucide-react';
-import { Outfit } from '../types';
+import { Outfit, normalizeOutfitValue, normalizeOutfitArray } from '../types';
 
 interface WardrobeCatalogViewProps {
   outfits: Outfit[];
@@ -18,25 +18,29 @@ export const WardrobeCatalogView: React.FC<WardrobeCatalogViewProps> = ({
   const [selectedTag, setSelectedTag] = useState<string>('all');
 
   const allEventTypes = Array.from(
-    new Set(outfits.flatMap((o) => o.event_types || []))
-  );
+    new Set(outfits.flatMap((o) => normalizeOutfitArray(o.event_types)))
+  ).filter((t) => t !== 'null');
 
   const allTags = Array.from(
-    new Set(outfits.flatMap((o) => o.style_tags || []))
-  );
+    new Set(outfits.flatMap((o) => normalizeOutfitArray(o.style_tags)))
+  ).filter((t) => t !== 'null');
 
   const filteredOutfits = outfits.filter((outfit) => {
+    const nameVal = normalizeOutfitValue(outfit.name);
+    const tagsVal = normalizeOutfitArray(outfit.style_tags);
+    const eventTypesVal = normalizeOutfitArray(outfit.event_types);
+
     const matchesSearch =
-      outfit.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      outfit.style_tags.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
+      nameVal.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      tagsVal.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesEventType =
       selectedEventType === 'all' ||
-      outfit.event_types.includes(selectedEventType);
+      eventTypesVal.includes(selectedEventType);
 
     const matchesTag =
       selectedTag === 'all' ||
-      outfit.style_tags.includes(selectedTag);
+      tagsVal.includes(selectedTag);
 
     return matchesSearch && matchesEventType && matchesTag;
   });
@@ -95,85 +99,99 @@ export const WardrobeCatalogView: React.FC<WardrobeCatalogViewProps> = ({
         </div>
       </div>
 
-      {/* Editorial Garment Gallery Grid: Prominent Images */}
+      {/* Editorial Garment Gallery Grid: Uniform aspect-[3/4] Images */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 sm:gap-8">
-        {filteredOutfits.map((outfit) => (
-          <div
-            key={outfit.id}
-            className="group bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden shadow-xs transition-all duration-300 flex flex-col justify-between"
-          >
-            <div>
-              {/* Photo Mockup Container */}
-              <div
-                onClick={() => onSelectOutfit(outfit)}
-                className="relative h-80 overflow-hidden cursor-pointer bg-[#EAE3D6]"
-              >
-                <img
-                  src={outfit.image_url}
-                  alt={outfit.name}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
+        {filteredOutfits.map((outfit) => {
+          const outfitId = normalizeOutfitValue(outfit.id);
+          const outfitName = normalizeOutfitValue(outfit.name);
+          const eventTypes = normalizeOutfitArray(outfit.event_types);
+          const styleTags = normalizeOutfitArray(outfit.style_tags);
+          const imageUrl = outfit.image_url && outfit.image_url.trim() !== '' ? outfit.image_url : null;
 
-                <div className="absolute top-3 left-3 flex flex-wrap gap-1">
-                  {outfit.event_types.slice(0, 2).map((et) => (
-                    <span
-                      key={et}
-                      className="text-[9px] font-medium uppercase tracking-widest px-2 py-0.5 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8]"
-                    >
-                      {et}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <span className="px-3.5 py-1.5 rounded-sm bg-[#FAF7F2]/95 text-[#141210] border border-[#EBE4D8] text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
-                    <Eye className="w-3.5 h-3.5 text-[#8B1E1E]" /> Xem Ảnh
-                  </span>
-                </div>
-              </div>
-
-              {/* Minimalist Card Content - Purely Name and Tags */}
-              <div className="p-4 space-y-2">
-                <h3
+          return (
+            <div
+              key={outfitId}
+              className="group bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden shadow-xs transition-all duration-300 flex flex-col justify-between"
+            >
+              <div>
+                {/* Photo Mockup Container: Uniform aspect-[3/4] */}
+                <div
                   onClick={() => onSelectOutfit(outfit)}
-                  className="font-serif font-medium text-[#141210] text-base leading-snug line-clamp-1 cursor-pointer group-hover:text-[#8B1E1E] transition-colors"
+                  className="relative aspect-[3/4] w-full overflow-hidden cursor-pointer bg-[#EAE3D6]"
                 >
-                  {outfit.name}
-                </h3>
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={outfitName}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center font-mono text-xs text-[#78716A] bg-[#EDE6DB]">
+                      null
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
 
-                <div className="flex flex-wrap gap-1">
-                  {outfit.style_tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="text-[9px] px-1.5 py-0.5 rounded-sm bg-[#FAF7F2] text-[#78716A] border border-[#EBE4D8]"
-                    >
-                      #{tag}
+                  <div className="absolute top-3 left-3 flex flex-wrap gap-1">
+                    {eventTypes.slice(0, 2).map((et) => (
+                      <span
+                        key={et}
+                        className="text-[9px] font-medium uppercase tracking-widest px-2 py-0.5 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8]"
+                      >
+                        {et}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="px-3.5 py-1.5 rounded-sm bg-[#FAF7F2]/95 text-[#141210] border border-[#EBE4D8] text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+                      <Eye className="w-3.5 h-3.5 text-[#8B1E1E]" /> Xem Ảnh
                     </span>
-                  ))}
+                  </div>
+                </div>
+
+                {/* Minimalist Card Content */}
+                <div className="p-4 space-y-2">
+                  <h3
+                    onClick={() => onSelectOutfit(outfit)}
+                    className="font-serif font-medium text-[#141210] text-base leading-snug line-clamp-1 cursor-pointer group-hover:text-[#8B1E1E] transition-colors"
+                  >
+                    {outfitName}
+                  </h3>
+
+                  <div className="flex flex-wrap gap-1">
+                    {styleTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-[9px] px-1.5 py-0.5 rounded-sm bg-[#FAF7F2] text-[#78716A] border border-[#EBE4D8]"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Footer Action */}
-            <div className="p-4 pt-2 border-t border-[#F0EAE0] bg-[#FAF7F2] flex items-center gap-2">
-              <button
-                onClick={() => onSelectOutfit(outfit)}
-                className="flex-1 py-2 px-2.5 rounded-sm bg-[#FFFFFF] hover:bg-[#FAF7F2] border border-[#EBE4D8] text-[#141210] text-xs font-medium transition-colors uppercase tracking-wider text-center"
-              >
-                Chi Tiết
-              </button>
-              <button
-                onClick={() => onStyleWithOutfit(outfit)}
-                className="py-2 px-3 rounded-sm bg-[#8B1E1E] hover:bg-[#721616] text-[#FAF7F2] text-xs font-medium transition-colors flex items-center gap-1 uppercase tracking-wider shadow-xs"
-              >
-                <Sparkles className="w-3 h-3" />
-                Phối Đồ
-              </button>
+              {/* Footer Action */}
+              <div className="p-4 pt-2 border-t border-[#F0EAE0] bg-[#FAF7F2] flex items-center gap-2">
+                <button
+                  onClick={() => onSelectOutfit(outfit)}
+                  className="flex-1 py-2 px-2.5 rounded-sm bg-[#FFFFFF] hover:bg-[#FAF7F2] border border-[#EBE4D8] text-[#141210] text-xs font-medium transition-colors uppercase tracking-wider text-center"
+                >
+                  Chi Tiết
+                </button>
+                <button
+                  onClick={() => onStyleWithOutfit(outfit)}
+                  className="py-2 px-3 rounded-sm bg-[#8B1E1E] hover:bg-[#721616] text-[#FAF7F2] text-xs font-medium transition-colors flex items-center gap-1 uppercase tracking-wider shadow-xs"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  Phối Đồ
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {filteredOutfits.length === 0 && (

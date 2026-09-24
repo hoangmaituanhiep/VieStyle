@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   name TEXT,
+  age INTEGER,
+  personalities TEXT[] DEFAULT '{}',
+  hobbies TEXT[] DEFAULT '{}',
+  favourite_color TEXT,
   avatar_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

@@ -1,9 +1,10 @@
 import React from 'react';
-import { ArrowRight, Star, MapPin, ChevronRight, CheckCircle2, SlidersHorizontal } from 'lucide-react';
-import { Outfit, SuggestionHistory, UserPreferences } from '../types';
+import { ArrowRight, Star, MapPin, ChevronRight, CheckCircle2, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Outfit, SuggestionHistory, UserPreferences, normalizeOutfitValue, normalizeOutfitArray } from '../types';
 import { RatingStars } from './RatingStars';
 
 interface DashboardViewProps {
+  outfits?: Outfit[];
   latestSuggestion: SuggestionHistory | null;
   history: SuggestionHistory[];
   preferences: UserPreferences | null;
@@ -11,10 +12,12 @@ interface DashboardViewProps {
   onSelectOutfit: (outfit: Outfit, suggestion?: SuggestionHistory) => void;
   onNavigateToEventForm: () => void;
   onNavigateToPreferences: () => void;
+  onNavigateToMixMatch?: () => void;
   isLoading: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  outfits = [],
   latestSuggestion,
   history,
   preferences,
@@ -22,41 +25,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectOutfit,
   onNavigateToEventForm,
   onNavigateToPreferences,
+  onNavigateToMixMatch,
   isLoading,
 }) => {
-  const currentOutfit = latestSuggestion?.outfit;
-  const featuredImage = currentOutfit?.image_url || 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=1400&q=80';
+  const currentOutfit = latestSuggestion?.outfit || (outfits.length > 0 ? outfits[0] : null);
+  const currentOutfitName = currentOutfit ? normalizeOutfitValue(currentOutfit.name) : 'null';
+  const currentOutfitTags = currentOutfit ? normalizeOutfitArray(currentOutfit.style_tags) : ['null'];
+  const featuredImage = currentOutfit?.image_url && currentOutfit.image_url.trim() !== ''
+    ? currentOutfit.image_url
+    : null;
 
   const previousSuggestions = latestSuggestion
     ? history.filter((h) => h.id !== latestSuggestion.id)
     : history;
 
-  const heritageSilhouettes = [
-    {
-      title: 'Áo Dài',
-      tag: 'Tơ Tằm Vạn Phúc',
-      image: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=800&q=80',
-      event: 'Tết & Lễ Cưới',
-    },
-    {
-      title: 'Nhật Bình',
-      tag: 'Cung Đình Huế',
-      image: 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=800&q=80',
-      event: 'Nghi Lễ & Dạ Tiệc',
-    },
-    {
-      title: 'Áo Tứ Thân & Yếm',
-      tag: 'Lụa Sống & Đũi Thô',
-      image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=800&q=80',
-      event: 'Lễ Hội & Trà Đạo',
-    },
-    {
-      title: 'Áo Ngũ Thân',
-      tag: 'Tay Chẽn Đương Đại',
-      image: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?auto=format&fit=crop&w=800&q=80',
-      event: 'Ngoại Giao & Hội Nghị',
-    },
-  ];
+  // Real outfits from Supabase database (displayed in place of mock heritage silhouettes)
+  const displayOutfits = outfits.slice(0, 4);
 
   return (
     <div className="space-y-20 sm:space-y-28 pb-32 text-[#141210]">
@@ -75,10 +59,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </h1>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {onNavigateToMixMatch && (
+              <button
+                id="hero-mix-match-btn"
+                onClick={onNavigateToMixMatch}
+                className="inline-flex items-center gap-2 px-6 py-3.5 bg-[#8B1E1E] hover:bg-[#721616] text-[#FAF7F2] text-xs font-medium uppercase tracking-[0.18em] rounded-sm transition-all shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Mix & Match Studio</span>
+              </button>
+            )}
+
             <button
               id="hero-start-explore-btn"
               onClick={onNavigateToEventForm}
-              className="inline-flex items-center gap-2.5 px-7 py-3.5 bg-[#8B1E1E] hover:bg-[#721616] text-[#FAF7F2] text-xs font-medium uppercase tracking-[0.18em] rounded-sm transition-all shadow-xs"
+              className="inline-flex items-center gap-2.5 px-6 py-3.5 border border-[#8B1E1E] bg-[#FFFFFF] hover:bg-[#FAF7F2] text-[#8B1E1E] text-xs font-medium uppercase tracking-[0.18em] rounded-sm transition-all shadow-2xs"
             >
               <span>Phối Đồ Sự Kiện</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -87,7 +82,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="hero-manifesto-btn"
               onClick={onNavigateToPreferences}
-              className="px-7 py-3.5 border border-[#DCD3C4] hover:border-[#8B1E1E] bg-[#FFFFFF] hover:bg-[#FAF7F2] text-[#141210] text-xs font-medium uppercase tracking-[0.18em] rounded-sm transition-all"
+              className="px-6 py-3.5 border border-[#DCD3C4] hover:border-[#8B1E1E] bg-[#FFFFFF] hover:bg-[#FAF7F2] text-[#141210] text-xs font-medium uppercase tracking-[0.18em] rounded-sm transition-all"
             >
               Gu Thẩm Mỹ
             </button>
@@ -112,12 +107,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Large Stage Showcase */}
         <div className="relative rounded-sm overflow-hidden min-h-[500px] lg:min-h-[620px] bg-[#EDE6DB] border border-[#E3D9C8] group flex flex-col justify-end shadow-xs">
-          <img
-            src={featuredImage}
-            alt={currentOutfit?.name || 'Trang phục truyền thống'}
-            referrerPolicy="no-referrer"
-            className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-101 transition-transform duration-700"
-          />
+          {featuredImage ? (
+            <img
+              src={featuredImage}
+              alt={currentOutfitName}
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-101 transition-transform duration-700"
+            />
+          ) : (
+            <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center font-mono text-sm text-[#78716A] bg-[#EDE6DB]">
+              null
+            </div>
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent pointer-events-none" />
 
           {/* Minimalist Floating Overlay Card: No fluff paragraphs */}
@@ -135,14 +136,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div>
               <h3 className="font-serif text-xl sm:text-2xl font-medium text-[#141210] leading-snug">
-                {currentOutfit?.name || 'Áo Dài Tơ Tằm Hà Đông'}
+                {currentOutfitName}
               </h3>
             </div>
 
             {/* Quick tags instead of paragraphs */}
-            {currentOutfit?.style_tags && (
+            {currentOutfitTags && currentOutfitTags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {currentOutfit.style_tags.map((tag) => (
+                {currentOutfitTags.map((tag) => (
                   <span
                     key={tag}
                     className="text-[10px] px-2 py-0.5 rounded-sm bg-[#FAF7F2] text-[#59534B] border border-[#EBE4D8]"
@@ -188,51 +189,71 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* 3. BỘ TỨ PHONG THÁI CỔ PHỤC (HERITAGE SILHOUETTES) */}
+      {/* 3. BỘ SƯU TẬP CỔ PHỤC THỰC TẾ TỪ SUPABASE */}
       <section className="space-y-6">
         <div className="flex items-baseline justify-between border-b border-[#EBE4D8] pb-3">
           <h2 className="text-xl sm:text-2xl font-serif text-[#141210] font-medium">
-            Bộ Tứ Phong Thái Việt
+            Kho Cổ Phục ({outfits.length})
           </h2>
         </div>
 
-        {/* 4 Clean Editorial Visual Cards - No Filler Text */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {heritageSilhouettes.map((item, index) => (
-            <div
-              key={index}
-              onClick={onNavigateToEventForm}
-              className="group cursor-pointer bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden transition-all duration-300 flex flex-col justify-between shadow-xs"
-            >
-              <div>
-                <div className="relative h-72 overflow-hidden bg-[#EAE3D6]">
-                  <img
-                    src={item.image}
-                    alt={item.title}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-                  />
-                  <div className="absolute top-3 left-3">
-                    <span className="text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8] font-medium">
-                      {item.tag}
-                    </span>
+        {/* Real Outfits from Supabase Database - aspect-[3/4] & Null Normalization */}
+        {displayOutfits.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {displayOutfits.map((outfit) => {
+              const outfitName = normalizeOutfitValue(outfit.name);
+              const firstTag = normalizeOutfitArray(outfit.style_tags)[0] || 'null';
+              const firstEvent = normalizeOutfitArray(outfit.event_types)[0] || 'null';
+              const imageUrl = outfit.image_url && outfit.image_url.trim() !== '' ? outfit.image_url : null;
+
+              return (
+                <div
+                  key={outfit.id}
+                  onClick={() => onSelectOutfit(outfit)}
+                  className="group cursor-pointer bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden transition-all duration-300 flex flex-col justify-between shadow-xs"
+                >
+                  <div>
+                    {/* Uniform aspect-[3/4] Image Container */}
+                    <div className="relative aspect-[3/4] w-full overflow-hidden bg-[#EAE3D6]">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={outfitName}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center font-mono text-xs text-[#78716A]">
+                          null
+                        </div>
+                      )}
+                      <div className="absolute top-3 left-3">
+                        <span className="text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8] font-medium">
+                          {firstTag}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-1">
+                      <h3 className="font-serif text-lg text-[#141210] font-medium group-hover:text-[#8B1E1E] transition-colors line-clamp-1">
+                        {outfitName}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="p-4 pt-2 border-t border-[#F4EFE5] flex items-center justify-between text-[10px] text-[#8B1E1E] font-medium uppercase tracking-wider">
+                    <span>{firstEvent}</span>
+                    <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
                   </div>
                 </div>
-
-                <div className="p-4 space-y-1">
-                  <h3 className="font-serif text-lg text-[#141210] font-medium group-hover:text-[#8B1E1E] transition-colors">
-                    {item.title}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="p-4 pt-2 border-t border-[#F4EFE5] flex items-center justify-between text-[10px] text-[#8B1E1E] font-medium uppercase tracking-wider">
-                <span>{item.event}</span>
-                <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-8 text-center bg-[#FFFFFF] border border-[#EBE4D8] rounded-sm text-xs font-mono text-[#78716A]">
+            null
+          </div>
+        )}
       </section>
 
       {/* 4. PREVIOUS SUGGESTIONS / LỊCH SỬ GỢI Ý */}
@@ -257,26 +278,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               const outfit = item.outfit;
               if (!outfit) return null;
 
+              const outfitName = normalizeOutfitValue(outfit.name);
+              const outfitTags = normalizeOutfitArray(outfit.style_tags);
+              const imageUrl = outfit.image_url && outfit.image_url.trim() !== '' ? outfit.image_url : null;
+
               return (
                 <div
                   key={item.id}
                   className="group bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden shadow-xs transition-all duration-300 flex flex-col justify-between"
                 >
                   <div>
+                    {/* Uniform aspect-[3/4] image container */}
                     <div
                       onClick={() => onSelectOutfit(outfit, item)}
-                      className="relative h-64 overflow-hidden cursor-pointer bg-[#EAE3D6]"
+                      className="relative aspect-[3/4] w-full overflow-hidden cursor-pointer bg-[#EAE3D6]"
                     >
-                      <img
-                        src={outfit.image_url}
-                        alt={outfit.name}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                      />
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={outfitName}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center font-mono text-xs text-[#78716A] bg-[#EDE6DB]">
+                          null
+                        </div>
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
 
                       <span className="absolute top-3 left-3 text-[9px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8]">
-                        {item.event_type}
+                        {item.event_type || 'null'}
                       </span>
 
                       {item.rating && (
@@ -289,7 +321,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div className="absolute bottom-3 left-3 right-3 text-left">
                         <div className="text-xs font-medium text-white truncate drop-shadow-sm flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-[#C5A059] shrink-0" />
-                          {item.event_name}
+                          {item.event_name || 'null'}
                         </div>
                       </div>
                     </div>
@@ -299,10 +331,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         onClick={() => onSelectOutfit(outfit, item)}
                         className="font-serif font-medium text-[#141210] text-base leading-snug line-clamp-1 cursor-pointer group-hover:text-[#8B1E1E] transition-colors"
                       >
-                        {outfit.name}
+                        {outfitName}
                       </h4>
                       <div className="flex flex-wrap gap-1 pt-1">
-                        {outfit.style_tags.slice(0, 2).map((t) => (
+                        {outfitTags.slice(0, 2).map((t) => (
                           <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-sm bg-[#FAF7F2] text-[#78716A] border border-[#EBE4D8]">
                             #{t}
                           </span>

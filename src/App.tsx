@@ -6,13 +6,14 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
+import { MixMatchStudioView } from './components/MixMatchStudioView';
 import { EventFormView } from './components/EventFormView';
 import { PreferencesView } from './components/PreferencesView';
 import { WardrobeCatalogView } from './components/WardrobeCatalogView';
 import { SupabaseSetupView } from './components/SupabaseSetupView';
 import { OutfitDetailModal } from './components/OutfitDetailModal';
 import { AuthModal } from './components/AuthModal';
-import { Outfit, SuggestionHistory, UserPreferences, EventContext } from './types';
+import { Outfit, SuggestionHistory, UserPreferences, EventContext, MixMatchItem } from './types';
 import {
   fetchOutfits,
   fetchUserPreferences,
@@ -20,6 +21,8 @@ import {
   fetchSuggestionsHistory,
   saveSuggestion,
   updateSuggestionRating,
+  fetchMixHistory,
+  saveMixHistory,
   getAuthSession,
   signOutSupabase,
   getSupabaseClient,
@@ -29,11 +32,13 @@ import {
 const ADMIN_UUID = 'dae05a68-ee99-470f-8f17-7db434e65f8d';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase' | 'mix-match'>('dashboard');
   const [user, setUser] = useState<any | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
+  const [outfitsError, setOutfitsError] = useState<string | null>(null);
   const [history, setHistory] = useState<SuggestionHistory[]>([]);
+  const [mixHistory, setMixHistory] = useState<MixMatchItem[]>([]);
   const [latestSuggestion, setLatestSuggestion] = useState<SuggestionHistory | null>(null);
 
   // Modals & detail views
@@ -55,12 +60,14 @@ export default function App() {
   // Helper to load authenticated user's preferences & history
   const loadUserData = async (userId: string) => {
     try {
-      const [userPrefs, userHistory] = await Promise.all([
+      const [userPrefs, userHistory, userMixHistory] = await Promise.all([
         fetchUserPreferences(userId),
         fetchSuggestionsHistory(userId),
+        fetchMixHistory(userId),
       ]);
       setPreferences(userPrefs);
       setHistory(userHistory);
+      setMixHistory(userMixHistory);
       setLatestSuggestion(userHistory.length > 0 ? userHistory[0] : null);
     } catch (err) {
       console.warn('Error loading user data:', err);
@@ -81,9 +88,15 @@ export default function App() {
         }
 
         // 2. Fetch outfits catalog (publicly accessible)
-        const loadedOutfits = await fetchOutfits();
+        const { data: loadedOutfits, error: fetchError } = await fetchOutfits();
         if (isMounted) {
-          setOutfits(loadedOutfits);
+          if (fetchError) {
+            setOutfitsError(fetchError);
+            setOutfits([]);
+          } else {
+            setOutfits(loadedOutfits || []);
+            setOutfitsError(null);
+          }
         }
 
         // 3. Check existing Supabase session
@@ -95,6 +108,7 @@ export default function App() {
           } else {
             setPreferences(null);
             setHistory([]);
+            setMixHistory([]);
             setLatestSuggestion(null);
           }
         }
@@ -120,6 +134,7 @@ export default function App() {
       } else {
         setPreferences(null);
         setHistory([]);
+        setMixHistory([]);
         setLatestSuggestion(null);
       }
     });
@@ -171,7 +186,7 @@ export default function App() {
           rating: h.rating as number,
         }));
 
-      // Call Full-Stack Backend API route (/api/recommend-outfit)
+      // Call Full-Stack Backend API route (/api/recommend-outfit) with mix_history personalization
       const res = await fetch('/api/recommend-outfit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,6 +194,7 @@ export default function App() {
           user_profile: activePrefs,
           event_context: eventContext,
           past_ratings: pastRatingsSummary,
+          mix_history: mixHistory,
           available_outfits: outfits,
         }),
       });
@@ -218,6 +234,18 @@ export default function App() {
       showNotification(err?.message || 'Không thể tạo gợi ý trang phục. Vui lòng thử lại.', 'error');
     } finally {
       setIsLoadingAI(false);
+    }
+  };
+
+  // Handle Save Mix History from Mix & Match Studio
+  const handleSaveMixHistory = async (item: Omit<MixMatchItem, 'id' | 'created_at'>) => {
+    try {
+      const saved = await saveMixHistory(item);
+      setMixHistory((prev) => [saved, ...prev]);
+      showNotification('Bản phối độc bản đã được lưu vào hồ sơ cá nhân.');
+    } catch (err: any) {
+      console.error('Save mix history error:', err);
+      showNotification('Không thể lưu bản phối.', 'error');
     }
   };
 
@@ -267,6 +295,7 @@ export default function App() {
     setUser(null);
     setPreferences(null);
     setHistory([]);
+    setMixHistory([]);
     setLatestSuggestion(null);
     showNotification('Đã đăng xuất tài khoản.');
   };
@@ -314,6 +343,7 @@ export default function App() {
           <>
             {activeTab === 'dashboard' && (
               <DashboardView
+                outfits={outfits}
                 latestSuggestion={latestSuggestion}
                 history={history}
                 preferences={preferences}
@@ -324,7 +354,18 @@ export default function App() {
                 }}
                 onNavigateToEventForm={() => setActiveTab('event-form')}
                 onNavigateToPreferences={() => setActiveTab('preferences')}
+                onNavigateToMixMatch={() => setActiveTab('mix-match')}
                 isLoading={isLoadingAI}
+              />
+            )}
+
+            {activeTab === 'mix-match' && (
+              <MixMatchStudioView
+                user={user}
+                outfits={outfits}
+                mixHistory={mixHistory}
+                onSaveMix={handleSaveMixHistory}
+                onOpenAuth={() => setIsAuthModalOpen(true)}
               />
             )}
 
@@ -368,9 +409,17 @@ export default function App() {
             {activeTab === 'supabase' && user?.id === ADMIN_UUID && (
               <SupabaseSetupView
                 isSupabaseConnected={isSupabaseConnected}
-                onRefreshConnection={() => {
+                onRefreshConnection={async () => {
                   const client = getSupabaseClient();
                   setIsSupabaseConnected(!!client);
+                  const { data: loadedOutfits, error: fetchErr } = await fetchOutfits();
+                  if (fetchErr) {
+                    setOutfitsError(fetchErr);
+                    setOutfits([]);
+                  } else {
+                    setOutfits(loadedOutfits || []);
+                    setOutfitsError(null);
+                  }
                 }}
               />
             )}

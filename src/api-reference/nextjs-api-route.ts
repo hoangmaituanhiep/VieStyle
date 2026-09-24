@@ -41,12 +41,12 @@ export async function POST(req: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 2. Fetch User Style Preferences
+    // 2. Fetch User Style Preferences from profiles
     const { data: userPreferences, error: prefError } = await supabase
-      .from('user_preferences')
+      .from('profiles')
       .select('*')
-      .eq('user_id', userId)
-      .single();
+      .eq('id', userId)
+      .maybeSingle();
 
     if (prefError && prefError.code !== 'PGRST116') {
       console.warn('Error fetching preferences:', prefError);

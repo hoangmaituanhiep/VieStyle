@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, SlidersHorizontal, MapPin } from 'lucide-react';
-import { Outfit, SuggestionHistory } from '../types';
+import { Outfit, SuggestionHistory, normalizeOutfitValue, normalizeOutfitArray } from '../types';
 import { RatingStars } from './RatingStars';
 
 interface OutfitDetailModalProps {
@@ -22,6 +22,14 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
 }) => {
   if (!isOpen || !outfit) return null;
 
+  const outfitId = normalizeOutfitValue(outfit.id);
+  const outfitName = normalizeOutfitValue(outfit.name);
+  const outfitDesc = normalizeOutfitValue(outfit.description);
+  const eventTypes = normalizeOutfitArray(outfit.event_types);
+  const styleTags = normalizeOutfitArray(outfit.style_tags);
+  const colors = normalizeOutfitArray(outfit.colors);
+  const imageUrl = outfit.image_url && outfit.image_url.trim() !== '' ? outfit.image_url : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/65 backdrop-blur-sm overflow-y-auto animate-fadeIn">
       <div className="relative w-full max-w-5xl bg-[#FAF7F2] border border-[#EBE4D8] rounded-sm shadow-2xl overflow-hidden text-[#141210]">
@@ -35,14 +43,20 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-12 max-h-[85vh] overflow-y-auto">
-          {/* Visual Column - Prominent Image */}
-          <div className="md:col-span-7 relative bg-[#EAE3D6] flex items-center justify-center min-h-[400px] md:min-h-[560px]">
-            <img
-              src={outfit.image_url}
-              alt={outfit.name}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover object-center max-h-[640px] md:max-h-full"
-            />
+          {/* Visual Column - Uniform aspect-[3/4] Image */}
+          <div className="md:col-span-7 relative bg-[#EAE3D6] flex items-center justify-center aspect-[3/4] md:aspect-auto min-h-[380px] md:min-h-[560px] overflow-hidden">
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={outfitName}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover object-center"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center font-mono text-sm text-[#78716A] bg-[#EDE6DB]">
+                null
+              </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
           </div>
 
@@ -54,10 +68,10 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
                   VIESTYLE
                 </span>
                 <h2 className="text-2xl sm:text-3xl font-serif font-medium text-[#141210] tracking-tight leading-snug">
-                  {outfit.name}
+                  {outfitName}
                 </h2>
                 <p className="text-xs text-[#59534B] font-sans pt-2">
-                  {outfit.description}
+                  {outfitDesc}
                 </p>
               </div>
 
@@ -67,7 +81,7 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
                   Dịp Sự Kiện
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {outfit.event_types.map((et) => (
+                  {eventTypes.map((et) => (
                     <span
                       key={et}
                       className="text-xs px-2.5 py-0.5 rounded-sm bg-[#FFFFFF] text-[#141210] border border-[#EBE4D8] capitalize font-medium"
@@ -84,7 +98,7 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
                   Phong Cách
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {outfit.style_tags.map((tag) => (
+                  {styleTags.map((tag) => (
                     <span
                       key={tag}
                       className="text-xs px-2.5 py-0.5 rounded-sm bg-[#FFFFFF] text-[#8B1E1E] border border-[#EBE4D8] font-medium"
@@ -101,7 +115,7 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
                   Màu Sắc
                 </span>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {outfit.colors.map((color) => (
+                  {colors.map((color) => (
                     <span
                       key={color}
                       className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-sm bg-[#FFFFFF] border border-[#EBE4D8] text-[#141210]"
@@ -118,7 +132,7 @@ export const OutfitDetailModal: React.FC<OutfitDetailModalProps> = ({
                 <div className="pt-3 border-t border-[#EBE4D8] space-y-2 bg-[#FFFFFF] p-4 rounded-sm border border-[#EBE4D8]">
                   <div className="text-xs text-[#141210] font-medium flex items-center gap-1.5">
                     <MapPin className="w-3.5 h-3.5 text-[#8B1E1E]" />
-                    {suggestion.event_name} — {suggestion.event_place}
+                    {suggestion.event_name || 'null'} — {suggestion.event_place || 'null'}
                   </div>
 
                   {suggestion.ai_reasoning && (

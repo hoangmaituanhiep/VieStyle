@@ -1,32 +1,64 @@
 import { createClient, SupabaseClient, User, Session, AuthChangeEvent } from '@supabase/supabase-js';
-import { Outfit, UserPreferences, SuggestionHistory } from '../types';
-import { DEFAULT_OUTFITS } from '../data/defaultOutfits';
+import { Outfit, UserPreferences, SuggestionHistory, MixMatchItem, parseOutfitRow, parseStringOrArray } from '../types';
 
 const STORAGE_KEYS = {
   SUPABASE_URL: 'aurastyle_supabase_url',
   SUPABASE_ANON_KEY: 'aurastyle_supabase_key',
+  MIX_HISTORY: 'aurastyle_mix_history',
 };
 
-// Retrieve environment credentials or stored settings
-export function getStoredSupabaseConfig(): { url: string; key: string } {
-  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Retrieve environment credentials or stored settings across Vite and Next.js environments
+export function getStoredSupabaseConfig(): { url: string; key: string; error: string | null } {
+  // 1. Vite environment variables
+  let viteUrl = '';
+  let viteKey = '';
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      viteUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
+      viteKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
+    }
+  } catch {
+    // ignore
+  }
 
+  // 2. Next.js / Node process environment variables
+  let nextUrl = '';
+  let nextKey = '';
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      nextUrl =
+        process.env.NEXT_PUBLIC_SUPABASE_URL ||
+        process.env.VITE_SUPABASE_URL ||
+        process.env.SUPABASE_URL ||
+        '';
+      nextKey =
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        '';
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Stored browser settings in localStorage
   const storedUrl = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '' : '';
   const storedKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '' : '';
 
-  return {
-    url: (storedUrl || envUrl || '').trim(),
-    key: (storedKey || envKey || '').trim(),
-  };
+  const url = (storedUrl || viteUrl || nextUrl || '').trim();
+  const key = (storedKey || viteKey || nextKey || '').trim();
+
+  const error = !url || !key ? 'Thiếu biến môi trường Supabase' : null;
+
+  return { url, key, error };
 }
 
 let supabaseInstance: SupabaseClient | null = null;
 let currentConfigKey = '';
 
 export function getSupabaseClient(): SupabaseClient | null {
-  const { url, key } = getStoredSupabaseConfig();
-  if (!url || !key) {
+  const { url, key, error } = getStoredSupabaseConfig();
+  if (error || !url || !key) {
     supabaseInstance = null;
     return null;
   }
@@ -81,23 +113,76 @@ export function clearSupabaseConfig() {
 // DATA ACCESS LAYER
 // ----------------------------------------------------------------------------
 
-export async function fetchOutfits(): Promise<Outfit[]> {
-  const client = getSupabaseClient();
-  if (client) {
+export async function fetchOutfits(): Promise<{ data: Outfit[] | null; error: string | null }> {
+  let { url, key, error: configError } = getStoredSupabaseConfig();
+
+  // If missing on client, attempt to sync from server proxy config
+  if ((!url || !key) && typeof window !== 'undefined') {
     try {
-      const { data, error } = await client
-        .from('outfits')
-        .select('*')
-        .order('name');
-      if (!error && data && data.length > 0) {
-        return data as Outfit[];
+      const res = await fetch('/api/supabase-config');
+      if (res.ok) {
+        const serverConfig = await res.json();
+        if (serverConfig?.url && serverConfig?.key) {
+          saveSupabaseConfig(serverConfig.url, serverConfig.key);
+          url = serverConfig.url.trim();
+          key = serverConfig.key.trim();
+          configError = null;
+        }
       }
-    } catch (err) {
-      console.warn('Supabase fetch outfits error, falling back to curated assets:', err);
+    } catch {
+      // server route may not be reached
     }
   }
-  // Curated fallback outfits ensure the AI styling model always has garments to inspect
-  return DEFAULT_OUTFITS;
+
+  if (configError || !url || !key) {
+    return {
+      data: null,
+      error: 'Thiếu biến môi trường Supabase',
+    };
+  }
+
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      data: null,
+      error: 'Thiếu biến môi trường Supabase',
+    };
+  }
+
+  try {
+    const { data, error: queryError } = await client
+      .from('outfits')
+      .select('*')
+      .order('name');
+
+    if (queryError) {
+      console.error('Supabase fetch outfits error:', queryError);
+      return {
+        data: null,
+        error: queryError.message || 'Lỗi truy vấn bảng outfits từ Supabase',
+      };
+    }
+
+    if (!data) {
+      return {
+        data: [],
+        error: null,
+      };
+    }
+
+    const parsedOutfits: Outfit[] = data.map((row: any) => parseOutfitRow(row));
+
+    return {
+      data: parsedOutfits,
+      error: null,
+    };
+  } catch (err: any) {
+    console.error('Failed to query Supabase outfits table:', err);
+    return {
+      data: null,
+      error: err?.message || 'Không thể kết nối đến máy chủ Supabase',
+    };
+  }
 }
 
 export async function fetchUserPreferences(userId: string): Promise<UserPreferences | null> {
@@ -107,16 +192,27 @@ export async function fetchUserPreferences(userId: string): Promise<UserPreferen
 
   try {
     const { data, error } = await client
-      .from('user_preferences')
+      .from('profiles')
       .select('*')
-      .eq('user_id', userId)
+      .eq('id', userId)
       .maybeSingle();
 
     if (!error && data) {
-      return data as UserPreferences;
+      const rawAge = data.age;
+      const parsedAge = typeof rawAge === 'number' ? Math.floor(rawAge) : (parseInt(String(rawAge), 10) || 26);
+      return {
+        id: data.id,
+        user_id: data.id,
+        name: data.name || '',
+        age: parsedAge,
+        personalities: parseStringOrArray(data.personalities),
+        hobbies: parseStringOrArray(data.hobbies),
+        favourite_color: data.favourite_color || '',
+        updated_at: data.updated_at,
+      };
     }
   } catch (err) {
-    console.warn('Supabase fetch preferences error:', err);
+    console.warn('Supabase fetch profiles error:', err);
   }
   return null;
 }
@@ -127,29 +223,45 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
     throw new Error('Supabase client is not connected. Please configure your Supabase URL & Anon Key.');
   }
 
+  const userId = preferences.user_id;
+  const ageInt = typeof preferences.age === 'number'
+    ? Math.floor(preferences.age)
+    : (parseInt(String(preferences.age), 10) || 26);
+  const personalitiesArray: string[] = parseStringOrArray(preferences.personalities);
+  const hobbiesArray: string[] = parseStringOrArray(preferences.hobbies);
+  const nameStr = (preferences.name || '').trim();
+  const colorStr = (preferences.favourite_color || '').trim();
+
+  // BẮT BUỘC: Sử dụng lệnh update để điền thông tin vào row đã có sẵn
+  // await supabase.from('profiles').update({ name, age, personalities, hobbies, favourite_color }).eq('id', user.id);
   const { data, error } = await client
-    .from('user_preferences')
-    .upsert(
-      {
-        user_id: preferences.user_id,
-        name: preferences.name,
-        age: preferences.age,
-        personalities: preferences.personalities,
-        hobbies: preferences.hobbies,
-        favourite_color: preferences.favourite_color,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    )
+    .from('profiles')
+    .update({
+      name: nameStr,
+      age: ageInt,
+      personalities: personalitiesArray,
+      hobbies: hobbiesArray,
+      favourite_color: colorStr,
+    })
+    .eq('id', userId)
     .select()
     .single();
 
   if (error) {
-    console.error('Failed to save user preferences:', error);
+    console.error('Failed to update profiles in Supabase:', error);
     throw error;
   }
 
-  return data as UserPreferences;
+  return {
+    id: data?.id || userId,
+    user_id: data?.id || userId,
+    name: data?.name !== undefined && data?.name !== null ? data.name : nameStr,
+    age: typeof data?.age === 'number' ? data.age : ageInt,
+    personalities: parseStringOrArray(data?.personalities || personalitiesArray),
+    hobbies: parseStringOrArray(data?.hobbies || hobbiesArray),
+    favourite_color: data?.favourite_color !== undefined && data?.favourite_color !== null ? data.favourite_color : colorStr,
+    updated_at: data?.updated_at,
+  };
 }
 
 export async function fetchSuggestionsHistory(userId: string): Promise<SuggestionHistory[]> {
@@ -165,7 +277,10 @@ export async function fetchSuggestionsHistory(userId: string): Promise<Suggestio
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      return data as SuggestionHistory[];
+      return data.map((item: any) => ({
+        ...item,
+        outfit: item.outfit ? parseOutfitRow(item.outfit) : undefined,
+      })) as SuggestionHistory[];
     }
   } catch (err) {
     console.warn('Supabase fetch history error:', err);
@@ -201,7 +316,10 @@ export async function saveSuggestion(suggestion: Omit<SuggestionHistory, 'id' | 
     throw error;
   }
 
-  return data as SuggestionHistory;
+  return {
+    ...data,
+    outfit: data.outfit ? parseOutfitRow(data.outfit) : undefined,
+  } as SuggestionHistory;
 }
 
 export async function updateSuggestionRating(id: string, rating: number): Promise<boolean> {
@@ -223,6 +341,122 @@ export async function updateSuggestionRating(id: string, rating: number): Promis
     console.warn('Supabase rating update exception:', err);
     return false;
   }
+}
+
+// ----------------------------------------------------------------------------
+// MIX & MATCH AI STUDIO HISTORY
+// ----------------------------------------------------------------------------
+
+export async function fetchMixHistory(userId?: string): Promise<MixMatchItem[]> {
+  const client = getSupabaseClient();
+  let remoteData: MixMatchItem[] = [];
+
+  if (client) {
+    try {
+      let query = client
+        .from('mix_history')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (userId) {
+        query = query.or(`user_id.eq.${userId},user_id.is.null`);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        remoteData = data as MixMatchItem[];
+      }
+    } catch (err) {
+      console.warn('Supabase fetch mix_history warning:', err);
+    }
+  }
+
+  // Also read stored local mix history for instant responsiveness
+  let localData: MixMatchItem[] = [];
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.MIX_HISTORY) : null;
+    if (raw) {
+      localData = JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('Local mix history parse error:', e);
+  }
+
+  // Merge unique by ID
+  const map = new Map<string, MixMatchItem>();
+  remoteData.forEach((item) => map.set(item.id, item));
+  localData.forEach((item) => {
+    if (!map.has(item.id)) map.set(item.id, item);
+  });
+
+  const merged = Array.from(map.values()).sort((a, b) => {
+    const timeA = new Date(a.created_at || 0).getTime();
+    const timeB = new Date(b.created_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  return merged;
+}
+
+export async function saveMixHistory(
+  item: Omit<MixMatchItem, 'id' | 'created_at'> & { id?: string }
+): Promise<MixMatchItem> {
+  const generatedId = item.id || `mix-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date().toISOString();
+
+  const record: MixMatchItem = {
+    id: generatedId,
+    user_id: item.user_id,
+    garment_type: item.garment_type,
+    accessories: item.accessories || [],
+    primary_color: item.primary_color,
+    secondary_color: item.secondary_color,
+    background_vibe: item.background_vibe,
+    prompt_used: item.prompt_used,
+    image_url: item.image_url,
+    created_at: now,
+  };
+
+  // 1. Save to local storage first for resilience
+  try {
+    const existingRaw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.MIX_HISTORY) : null;
+    const existingList: MixMatchItem[] = existingRaw ? JSON.parse(existingRaw) : [];
+    const updatedList = [record, ...existingList.filter((m) => m.id !== record.id)].slice(0, 30);
+    localStorage.setItem(STORAGE_KEYS.MIX_HISTORY, JSON.stringify(updatedList));
+  } catch (err) {
+    console.warn('Failed to save mix history locally:', err);
+  }
+
+  // 2. Save to Supabase if connected
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('mix_history')
+        .insert([
+          {
+            user_id: record.user_id || null,
+            garment_type: record.garment_type,
+            accessories: record.accessories,
+            primary_color: record.primary_color,
+            secondary_color: record.secondary_color || null,
+            background_vibe: record.background_vibe || null,
+            prompt_used: record.prompt_used || null,
+            image_url: record.image_url,
+          },
+        ])
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as MixMatchItem;
+      }
+    } catch (err) {
+      console.warn('Supabase save mix_history error (falling back to local cache):', err);
+    }
+  }
+
+  return record;
 }
 
 // ----------------------------------------------------------------------------

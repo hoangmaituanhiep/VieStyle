@@ -5,8 +5,8 @@ import { UserPreferences } from '../types';
 const ADMIN_UUID = 'dae05a68-ee99-470f-8f17-7db434e65f8d';
 
 interface HeaderProps {
-  activeTab: 'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase';
-  setActiveTab: (tab: 'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase') => void;
+  activeTab: 'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase' | 'mix-match';
+  setActiveTab: (tab: 'dashboard' | 'event-form' | 'preferences' | 'catalog' | 'supabase' | 'mix-match') => void;
   user: any | null;
   preferences: UserPreferences | null;
   isSupabaseConnected: boolean;
@@ -54,7 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="nav-dashboard-btn"
               onClick={() => setActiveTab('dashboard')}
-              className={`px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
+              className={`px-3.5 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
                 activeTab === 'dashboard'
                   ? 'text-[#8B1E1E] font-semibold bg-[#F4EFE5]'
                   : 'text-[#59534B] hover:text-[#141210] hover:bg-[#F6F2EA]'
@@ -64,9 +64,22 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              id="nav-mix-match-btn"
+              onClick={() => setActiveTab('mix-match')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
+                activeTab === 'mix-match'
+                  ? 'text-[#8B1E1E] font-semibold bg-[#F4EFE5]'
+                  : 'text-[#59534B] hover:text-[#141210] hover:bg-[#F6F2EA]'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#8B1E1E]" />
+              Mix & Match
+            </button>
+
+            <button
               id="nav-event-form-btn"
               onClick={() => setActiveTab('event-form')}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
                 activeTab === 'event-form'
                   ? 'text-[#8B1E1E] font-semibold bg-[#F4EFE5]'
                   : 'text-[#59534B] hover:text-[#141210] hover:bg-[#F6F2EA]'
@@ -79,7 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="nav-preferences-btn"
               onClick={() => setActiveTab('preferences')}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
                 activeTab === 'preferences'
                   ? 'text-[#8B1E1E] font-semibold bg-[#F4EFE5]'
                   : 'text-[#59534B] hover:text-[#141210] hover:bg-[#F6F2EA]'
@@ -92,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="nav-catalog-btn"
               onClick={() => setActiveTab('catalog')}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium tracking-wider uppercase transition-all rounded-sm ${
                 activeTab === 'catalog'
                   ? 'text-[#8B1E1E] font-semibold bg-[#F4EFE5]'
                   : 'text-[#59534B] hover:text-[#141210] hover:bg-[#F6F2EA]'
@@ -172,31 +185,38 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Mobile Tab Bar */}
-      <div className="md:hidden flex items-center justify-around py-2.5 px-2 bg-[#FAF7F2] border-t border-[#EBE4D8] text-[11px]">
+      <div className="md:hidden flex items-center justify-around py-2.5 px-2 bg-[#FAF7F2] border-t border-[#EBE4D8] text-[10px]">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center gap-1 py-1 px-2 rounded ${activeTab === 'dashboard' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+          className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'dashboard' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
         >
           <Sparkles className="w-4 h-4" />
           <span>Trang Chủ</span>
         </button>
         <button
+          onClick={() => setActiveTab('mix-match')}
+          className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'mix-match' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+        >
+          <Sparkles className="w-4 h-4 text-[#8B1E1E]" />
+          <span>Mix&Match</span>
+        </button>
+        <button
           onClick={() => setActiveTab('event-form')}
-          className={`flex flex-col items-center gap-1 py-1 px-2 rounded ${activeTab === 'event-form' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+          className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'event-form' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
         >
           <SlidersHorizontal className="w-4 h-4" />
           <span>Sự Kiện</span>
         </button>
         <button
           onClick={() => setActiveTab('preferences')}
-          className={`flex flex-col items-center gap-1 py-1 px-2 rounded ${activeTab === 'preferences' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+          className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'preferences' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
         >
           <User className="w-4 h-4" />
           <span>Gu Riêng</span>
         </button>
         <button
           onClick={() => setActiveTab('catalog')}
-          className={`flex flex-col items-center gap-1 py-1 px-2 rounded ${activeTab === 'catalog' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+          className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'catalog' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
         >
           <Shirt className="w-4 h-4" />
           <span>Kho Áo</span>
@@ -204,7 +224,7 @@ export const Header: React.FC<HeaderProps> = ({
         {isAdmin && (
           <button
             onClick={() => setActiveTab('supabase')}
-            className={`flex flex-col items-center gap-1 py-1 px-2 rounded ${activeTab === 'supabase' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 rounded ${activeTab === 'supabase' ? 'text-[#8B1E1E] font-semibold' : 'text-[#78716A]'}`}
           >
             <Database className="w-4 h-4" />
             <span>SQL</span>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Check, Plus, CheckCircle2, User, Lock } from 'lucide-react';
 import { UserPreferences } from '../types';
+import { getSupabaseClient } from '../lib/supabase';
 
 interface PreferencesViewProps {
   user: any | null;
@@ -113,17 +114,55 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
 
     setIsSaving(true);
     try {
+      // Chuyển đổi đúng định dạng kiểu dữ liệu:
+      // age: số nguyên (int4)
+      // personalities, hobbies: mảng chuỗi (text[])
+      const parsedAge = parseInt(String(age), 10);
+      const safeAge = isNaN(parsedAge) ? 26 : Math.max(1, Math.min(120, Math.floor(parsedAge)));
+      const safePersonalities = Array.isArray(personalities)
+        ? personalities.map((p) => String(p).trim()).filter(Boolean)
+        : [];
+      const safeHobbies = Array.isArray(hobbies)
+        ? hobbies.map((h) => String(h).trim()).filter(Boolean)
+        : [];
+      const safeName = name.trim();
+      const safeColor = (favouriteColor || '').trim();
+
+      // Cú pháp bắt buộc theo yêu cầu:
+      // await supabase.from('profiles').update({ name, age, personalities, hobbies, favourite_color }).eq('id', user.id);
+      const client = getSupabaseClient();
+      if (client && user.id) {
+        const { error: updateErr } = await client
+          .from('profiles')
+          .update({
+            name: safeName,
+            age: safeAge,
+            personalities: safePersonalities,
+            hobbies: safeHobbies,
+            favourite_color: safeColor,
+          })
+          .eq('id', user.id);
+
+        if (updateErr) {
+          console.error('Lỗi cập nhật bảng profiles:', updateErr);
+          throw updateErr;
+        }
+      }
+
       await onSave({
         user_id: user.id,
-        name: name.trim(),
-        age: parseInt(age, 10) || 26,
-        personalities,
-        hobbies,
-        favourite_color: favouriteColor,
+        name: safeName,
+        age: safeAge,
+        personalities: safePersonalities,
+        hobbies: safeHobbies,
+        favourite_color: safeColor,
       });
+
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
       if (onComplete) onComplete();
+    } catch (err: any) {
+      console.error('Lỗi khi lưu thông tin:', err);
     } finally {
       setIsSaving(false);
     }

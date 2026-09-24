@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   name TEXT,
+  age INTEGER,
+  personalities TEXT[] DEFAULT '{}',
+  hobbies TEXT[] DEFAULT '{}',
+  favourite_color TEXT,
   avatar_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -63,18 +67,34 @@ CREATE TABLE IF NOT EXISTS public.suggestions_history (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. INDEXES FOR HIGH PERFORMANCE
+-- 6. CREATE TABLE: mix_history (AI Mix & Match Experiments & Personalization Context)
+CREATE TABLE IF NOT EXISTS public.mix_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  garment_type TEXT NOT NULL,
+  accessories TEXT[] DEFAULT '{}',
+  primary_color TEXT NOT NULL,
+  secondary_color TEXT,
+  background_vibe TEXT,
+  prompt_used TEXT,
+  image_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON public.suggestions_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_suggestions_outfit_id ON public.suggestions_history(outfit_id);
 CREATE INDEX IF NOT EXISTS idx_suggestions_event_type ON public.suggestions_history(event_type);
+CREATE INDEX IF NOT EXISTS idx_mix_history_user_id ON public.mix_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_outfits_event_types ON public.outfits USING GIN(event_types);
 CREATE INDEX IF NOT EXISTS idx_outfits_style_tags ON public.outfits USING GIN(style_tags);
 
--- 7. ROW LEVEL SECURITY (RLS) POLICIES
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.outfits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.suggestions_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mix_history ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public profiles are viewable by everyone" 
   ON public.profiles FOR SELECT USING (true);
@@ -100,7 +120,14 @@ CREATE POLICY "Users can insert suggestions for themselves"
 CREATE POLICY "Users can update their own suggestion ratings" 
   ON public.suggestions_history FOR UPDATE USING (auth.uid() = user_id);
 
--- 8. TRIGGER FOR NEW USER REGISTRATION
+CREATE POLICY "Users can view their own mix history" 
+  ON public.mix_history FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own mix history" 
+  ON public.mix_history FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own mix history" 
+  ON public.mix_history FOR DELETE USING (auth.uid() = user_id);
+
+-- 9. TRIGGER FOR NEW USER REGISTRATION
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN

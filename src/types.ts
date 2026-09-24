@@ -16,9 +16,9 @@ export interface Outfit {
   name: string;
   description: string;
   image_url: string;
-  event_types: string[]; // e.g. ['formal', 'gala', 'cocktail']
-  style_tags: string[];  // e.g. ['minimalist', 'monochrome', 'tailored']
-  colors: string[];      // e.g. ['navy', 'charcoal', 'white']
+  event_types: string[] | string; // Handled as string in Supabase text columns or string[]
+  style_tags: string[] | string;  // Handled as string in Supabase text columns or string[]
+  colors: string[] | string;      // Handled as string in Supabase text columns or string[]
   created_at?: string;
 }
 
@@ -55,6 +55,19 @@ export interface EventContext {
   weather_notes?: string;
 }
 
+export interface MixMatchItem {
+  id: string;
+  user_id?: string;
+  garment_type: string;
+  accessories: string[];
+  primary_color: string;
+  secondary_color?: string;
+  background_vibe?: string;
+  prompt_used?: string;
+  image_url: string;
+  created_at?: string;
+}
+
 export interface RecommendationRequest {
   user_id: string;
   user_profile: UserPreferences;
@@ -66,6 +79,7 @@ export interface RecommendationRequest {
     rating: number;
     notes?: string;
   }>;
+  mix_history?: MixMatchItem[];
   available_outfits: Outfit[];
 }
 
@@ -76,4 +90,96 @@ export interface RecommendationResponse {
   styling_tips: string;
   alternative_outfit_id?: string;
   vibe_keywords?: string[];
+}
+
+/**
+ * Parses a value that may be an Array or a Text/String from Supabase
+ * (e.g. 'đỏ, xanh, vàng' or '["đỏ", "xanh"]' or ['đỏ', 'xanh']) into string[]
+ */
+export function parseStringOrArray(val: unknown): string[] {
+  if (val === null || val === undefined) {
+    return [];
+  }
+  if (Array.isArray(val)) {
+    return val
+      .map((item) => (item === null || item === undefined ? '' : String(item).trim()))
+      .filter((item) => item !== '' && item.toLowerCase() !== 'null');
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') {
+      return [];
+    }
+    // Check if JSON array string
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => (item === null || item === undefined ? '' : String(item).trim()))
+            .filter((item) => item !== '' && item.toLowerCase() !== 'null');
+        }
+      } catch {
+        // Fallback to comma separation
+      }
+    }
+    // Standard comma-delimited text from Supabase Text columns
+    return trimmed
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0 && item.toLowerCase() !== 'null');
+  }
+  return [];
+}
+
+/**
+ * Normalizes an outfit raw record from Supabase, parsing text columns into arrays
+ */
+export function parseOutfitRow(row: any): Outfit {
+  if (!row) {
+    return {
+      id: '',
+      name: 'null',
+      description: 'null',
+      image_url: '',
+      event_types: [],
+      style_tags: [],
+      colors: [],
+    };
+  }
+
+  return {
+    ...row,
+    id: String(row.id || ''),
+    name: row.name !== undefined && row.name !== null && String(row.name).trim() !== '' ? String(row.name).trim() : 'null',
+    description: row.description !== undefined && row.description !== null && String(row.description).trim() !== '' ? String(row.description).trim() : 'null',
+    image_url: row.image_url !== undefined && row.image_url !== null ? String(row.image_url).trim() : '',
+    event_types: parseStringOrArray(row.event_types),
+    style_tags: parseStringOrArray(row.style_tags),
+    colors: parseStringOrArray(row.colors),
+  };
+}
+
+/**
+ * Normalization helpers to ensure missing or empty outfit data cells display 'null' as required
+ */
+export function normalizeOutfitValue(val: string | undefined | null): string {
+  if (val === undefined || val === null) return 'null';
+  const trimmed = String(val).trim();
+  return trimmed === '' ? 'null' : trimmed;
+}
+
+export function normalizeOutfitArray(arr: string[] | string | undefined | null): string[] {
+  if (arr === undefined || arr === null) return ['null'];
+  if (typeof arr === 'string') {
+    const parsed = parseStringOrArray(arr);
+    return parsed.length > 0 ? parsed : ['null'];
+  }
+  if (Array.isArray(arr)) {
+    const cleaned = arr
+      .map((item) => (item === undefined || item === null ? '' : String(item).trim()))
+      .filter((item) => item !== '' && item.toLowerCase() !== 'null');
+    return cleaned.length > 0 ? cleaned : ['null'];
+  }
+  return ['null'];
 }
