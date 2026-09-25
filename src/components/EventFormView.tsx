@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Sparkles, Calendar, MapPin, ArrowRight, Loader2, CheckCircle, Star } from 'lucide-react';
-import { EventContext, UserPreferences, SuggestionHistory } from '../types';
+import { Sparkles, Calendar, MapPin, ArrowRight, Loader2, CheckCircle, Star, X } from 'lucide-react';
+import { EventContext, UserPreferences, SuggestionHistory, Outfit } from '../types';
 
 interface EventFormViewProps {
   user: any | null;
+  outfits?: Outfit[];
   preferences: UserPreferences | null;
   history?: SuggestionHistory[];
   pastHistory?: SuggestionHistory[];
-  onSubmit: (context: EventContext) => Promise<void>;
+  onSubmit: (context: EventContext) => Promise<any>;
   isLoading: boolean;
   onNavigateToPreferences: () => void;
   onOpenAuth?: () => void;
@@ -51,6 +52,7 @@ const VIETNAMESE_EVENT_PRESETS = [
 
 export const EventFormView: React.FC<EventFormViewProps> = ({
   user,
+  outfits = [],
   preferences,
   history = [],
   pastHistory = [],
@@ -65,6 +67,7 @@ export const EventFormView: React.FC<EventFormViewProps> = ({
   const [eventType, setEventType] = useState<EventContext['event_type']>('traditional');
   const [dressCode, setDressCode] = useState('');
   const [weatherNotes, setWeatherNotes] = useState('');
+  const [suggestedOutfit, setSuggestedOutfit] = useState<Outfit | null>(null);
 
   const allHistory = history.length > 0 ? history : pastHistory;
   const ratedHistory = allHistory.filter((h) => h.rating && h.rating > 0);
@@ -81,13 +84,25 @@ export const EventFormView: React.FC<EventFormViewProps> = ({
     e.preventDefault();
     if (!eventName.trim() || !eventPlace.trim()) return;
 
-    await onSubmit({
+    const result = await onSubmit({
       event_name: eventName.trim(),
       event_place: eventPlace.trim(),
       event_type: eventType,
       dress_code: dressCode.trim() || undefined,
       weather_notes: weatherNotes.trim() || undefined,
     });
+
+    if (result) {
+      const targetId =
+        result.outfit_id ||
+        result.selected_outfit_id ||
+        (result.outfit && result.outfit.id) ||
+        result.id;
+      const found = (outfits || []).find((o) => o.id === targetId) || result.outfit || null;
+      if (found) {
+        setSuggestedOutfit(found);
+      }
+    }
   };
 
   return (
@@ -267,6 +282,53 @@ export const EventFormView: React.FC<EventFormViewProps> = ({
           </button>
         </div>
       </form>
+
+      {/* Overlay Toàn Màn Hình Hiển Thị Trang Phục Được Chọn (Chuẩn VieStyle Minimalist) */}
+      {suggestedOutfit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
+          {/* Nút Đóng (biểu tượng X mỏng, tinh tế ở góc trên bên phải Overlay) */}
+          <button
+            type="button"
+            onClick={() => setSuggestedOutfit(null)}
+            className="absolute top-6 right-6 p-2.5 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-all z-10 focus:outline-none"
+            aria-label="Đóng"
+          >
+            <X className="w-6 h-6 stroke-[1.25]" />
+          </button>
+
+          {/* Visual Card của trang phục vào chính giữa màn hình */}
+          <div className="w-full max-w-sm sm:max-w-md bg-[#FAF7F2] border border-[#E3D9C8] rounded-xs shadow-2xl overflow-hidden flex flex-col items-center">
+            {/* Ảnh to, sắc nét, object-cover */}
+            <div className="relative w-full aspect-[3/4] overflow-hidden bg-[#EAE3D6]">
+              <img
+                src={suggestedOutfit.image_url}
+                alt={suggestedOutfit.name}
+                className="w-full h-full object-cover object-center transition-transform duration-700 hover:scale-105"
+              />
+            </div>
+
+            {/* Minimalist: Chữ chỉ chiếm 10%, không gian mở rộng rãi */}
+            <div className="w-full p-6 text-center space-y-2">
+              <span className="text-[10px] font-mono tracking-[0.25em] uppercase text-[#8B1E1E] font-semibold block">
+                TRANG PHỤC ĐƯỢC CHỌN
+              </span>
+              <h2 className="font-serif text-2xl font-medium text-[#141210] tracking-tight">
+                {suggestedOutfit.name}
+              </h2>
+              {suggestedOutfit.description && (
+                <p className="text-xs text-[#59534B] font-sans line-clamp-1 max-w-xs mx-auto">
+                  {suggestedOutfit.description}
+                </p>
+              )}
+              {suggestedOutfit.style_tags && (
+                <p className="text-[10px] font-mono text-[#78716A] uppercase tracking-wider pt-1">
+                  {suggestedOutfit.style_tags}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -279,13 +279,15 @@ export default function App() {
       const updatedHistory = [displayRecord, ...history];
       setHistory(updatedHistory);
       setLatestSuggestion(displayRecord);
-      setActiveTab('dashboard');
+      // Giữ user ở lại màn hình hiện tại - Không tự động chuyển hướng / reset tab
 
       if (data.cached) {
         showNotification('Gợi ý trang phục tức thì từ bộ nhớ đệm (Cache Hit)!');
       } else {
         showNotification('Gợi ý trang phục đã được phân tích và đồng bộ.');
       }
+
+      return displayRecord;
     } catch (err: any) {
       console.error('Styling error:', err);
       const is503 =
@@ -441,6 +443,7 @@ export default function App() {
             {activeTab === 'event-form' && (
               <EventFormView
                 user={user}
+                outfits={outfits}
                 onSubmit={handleEventFormSubmit}
                 isLoading={isLoadingAI}
                 preferences={preferences}
