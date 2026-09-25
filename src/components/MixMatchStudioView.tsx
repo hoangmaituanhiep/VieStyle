@@ -157,21 +157,22 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        const errMessage = errData?.error || `Google Imagen API HTTP ${res.status}`;
+        const errMessage = errData?.error || `Lỗi máy chủ (${res.status})`;
         throw new Error(errMessage);
       }
 
       const data = await res.json();
-      if (!data.image_url) {
+      const imageUrl = data.imageUrl || data.image_url;
+      if (!imageUrl) {
         throw new Error(data.error || 'Không nhận được dữ liệu hình ảnh.');
       }
 
       setGenerationError(null);
 
       const newResult = {
-        imageUrl: data.image_url,
+        imageUrl: imageUrl,
         promptUsed: data.prompt_used || '',
-        model: data.model || 'imagen-3.0-generate-001',
+        model: 'gemini-flash-pollinations',
         isSaved: false,
       };
 
@@ -502,7 +503,7 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
               {isGenerating ? (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
                   <p className="font-serif text-xs text-[#78716A] tracking-wider animate-pulse">
-                    Đang tạo ảnh AI...
+                    Đang phác thảo phối đồ AI...
                   </p>
                 </div>
               ) : generationError ? (

@@ -226,9 +226,9 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
 
     let response;
     try {
-      // Ưu tiên bản flash thay vì pro để nhanh và đỡ nghẽn
+      // Ưu tiên bản gemini-3.8-flash
       response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.8-flash',
         contents: userPrompt,
         config: {
           systemInstruction,
@@ -268,10 +268,9 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
         },
       });
     } catch (genaiError: any) {
-      console.error('Call to Gemini Flash failed (503 / Overload):', genaiError?.message);
-      return res.status(503).json({
-        error: 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
-        details: genaiError?.message,
+      console.error('Call to Gemini Flash failed:', genaiError?.message);
+      return res.status(500).json({
+        error: genaiError?.message || 'Lỗi máy chủ',
       });
     }
 
@@ -314,15 +313,15 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
       success: true,
       cached: false,
       recommendation: parsed,
-      engine: 'gemini-2.5-flash',
+      engine: 'gemini-3.8-flash',
     });
   } catch (error: any) {
     // =========================================================================
     // BƯỚC 3: ĐẢM BẢO ĐỘ BỀN BỈ (ERROR HANDLING)
     // =========================================================================
     console.error('API Route /api/recommend-outfit fatal error:', error?.message);
-    return res.status(503).json({
-      error: error?.message || 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
+    return res.status(500).json({
+      error: error?.message || 'Lỗi máy chủ',
     });
   }
 });
@@ -335,7 +334,7 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Calls Google Imagen 3 API with proper error reporting - NO MOCK IMAGE)
+// API Route: AI Mix & Match Image Generation (Gemini 1.5 Flash Prompt Generator + Pollinations.ai)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
@@ -356,7 +355,6 @@ app.post('/api/generate-outfit-image', async (req, res) => {
       console.error('Lỗi server: Chưa cấu hình GEMINI_API_KEY.');
       return res.status(500).json({
         error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ.',
-        status: 500,
       });
     }
 
@@ -370,117 +368,52 @@ app.post('/api/generate-outfit-image', async (req, res) => {
 
     const settingText = background_vibe || 'minimalist ancient Vietnamese heritage courtyard architecture';
 
-    // Crafted high-fashion editorial prompt for authentic Vietnamese traditional attire
-    const editorialPrompt = `A high-fashion magazine editorial full-length photograph of an elegant Vietnamese fashion model wearing authentic high-couture Vietnamese traditional costume: ${garment_type}. The garment is crafted in exquisite raw silk and brocade in ${colorScheme}. Styled with traditional Vietnamese accessories: ${accessoriesText}. Set against ${settingText} with soft directional daylight, subtle shadows, realistic silk texture drapery, cinematic lighting, 8k resolution, minimalist Vogue editorial aesthetics, hyper-detailed photography, authentic Vietnamese cultural heritage. ${style_notes || ''}`.trim();
+    const userPrompt = `Dựa trên các tuỳ chọn phối đồ này, hãy viết một câu miêu tả hình ảnh bằng TIẾNG ANH (Image Prompt) thật chi tiết, mang phong cách thời trang cao cấp (high-fashion editorial), rõ ràng về màu sắc và chất liệu truyền thống Việt Nam. CHỈ trả về câu prompt, không giải thích.
 
-    // 1. Direct REST API call to Google Imagen 3 endpoint
-    const imagenEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages?key=${apiKey}`;
+Thông tin phối đồ:
+- Trang phục: ${garment_type}
+- Màu sắc chủ đạo: ${primary_color}
+- Màu sắc điểm xuyết: ${secondary_color || 'Không'}
+- Phụ kiện truyền thống: ${accessoriesText}
+- Bối cảnh: ${settingText}
+${style_notes ? `- Ghi chú phong cách: ${style_notes}` : ''}`.trim();
 
-    console.log('Sending REST request to Imagen 3 endpoint:', imagenEndpoint);
-
-    let lastErrorMessage = '';
-    let lastStatusCode = 500;
-
+    // Sinh prompt chi tiết bằng gemini-3.8-flash
+    let promptText = '';
     try {
-      const imagenResponse = await fetch(imagenEndpoint, {
-        method: 'POST',
-        headers: {
-          'x-goog-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: editorialPrompt,
-          numberOfImages: 1,
-        }),
-      });
-
-      if (imagenResponse.ok) {
-        const data: any = await imagenResponse.json();
-        const base64Bytes =
-          data?.generatedImages?.[0]?.image?.imageBytes ||
-          data?.generatedImages?.[0]?.imageBytes ||
-          data?.predictions?.[0]?.bytesBase64Encoded ||
-          data?.predictions?.[0]?.image?.imageBytes;
-
-        if (base64Bytes) {
-          const generatedImageUrl = typeof base64Bytes === 'string' && base64Bytes.startsWith('data:')
-            ? base64Bytes
-            : `data:image/jpeg;base64,${base64Bytes}`;
-
-          return res.json({
-            success: true,
-            image_url: generatedImageUrl,
-            prompt_used: editorialPrompt,
-            model: 'imagen-3.0-generate-001',
-            garment_type,
-            accessories: Array.isArray(accessories) ? accessories : [],
-            primary_color,
-            secondary_color: secondary_color || null,
-            background_vibe: settingText,
-          });
-        }
-      } else {
-        lastStatusCode = imagenResponse.status;
-        try {
-          const errJson = await imagenResponse.json();
-          lastErrorMessage = errJson?.error?.message || errJson?.message || `Google Imagen API HTTP ${imagenResponse.status}`;
-        } catch {
-          const errText = await imagenResponse.text().catch(() => '');
-          lastErrorMessage = errText || `Google Imagen API HTTP ${imagenResponse.status}`;
-        }
-      }
-    } catch (fetchErr: any) {
-      lastErrorMessage = fetchErr?.message || 'Lỗi kết nối khi gọi Imagen API';
-    }
-
-    // 2. Fallback attempt with Gemini image generation
-    const ai = getGeminiClient();
-    if (ai) {
-      try {
-        console.log('Attempting Gemini image generation model fallback...');
-        const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-            parts: [{ text: editorialPrompt }],
-          },
+      const ai = getGeminiClient();
+      if (ai) {
+        const geminiRes = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: userPrompt,
         });
-
-        for (const part of fallbackRes.candidates?.[0]?.content?.parts || []) {
-          if (part.inlineData?.data) {
-            const generatedImageUrl = `data:${part.inlineData.mimeType || 'image/jpeg'};base64,${part.inlineData.data}`;
-            return res.json({
-              success: true,
-              image_url: generatedImageUrl,
-              prompt_used: editorialPrompt,
-              model: 'gemini-2.5-flash-image',
-              garment_type,
-              accessories: Array.isArray(accessories) ? accessories : [],
-              primary_color,
-              secondary_color: secondary_color || null,
-              background_vibe: settingText,
-            });
-          }
-        }
-      } catch (geminiImgErr: any) {
-        console.warn('Gemini image model fallback error:', geminiImgErr?.message);
-        if (!lastErrorMessage) {
-          lastErrorMessage = geminiImgErr?.message || 'Lỗi tạo hình ảnh.';
-        }
+        promptText = (geminiRes.text || '').trim();
       }
+    } catch (genErr: any) {
+      console.warn('Gemini client attempt error, trying standard fallback prompt...', genErr?.message);
     }
 
-    // No mock images! Return explicit error to be displayed in the UI box
-    const formattedError = `Google Imagen API HTTP ${lastStatusCode}: ${lastErrorMessage || 'Endpoint không khả dụng'}`;
-    console.error('Image generation failed with error:', formattedError);
-    return res.status(lastStatusCode).json({
-      error: formattedError,
-      status: lastStatusCode,
+    // Nếu Gemini không trả về prompt, sử dụng prompt dự phòng chuẩn xác
+    if (!promptText) {
+      promptText = `A high-fashion magazine editorial photograph of an elegant Vietnamese model in authentic ${garment_type}, crafted in raw silk and brocade in ${colorScheme}, styled with ${accessoriesText}, set against ${settingText}, cinematic lighting, 8k resolution, minimalist Vogue editorial aesthetics`;
+    }
+
+    // Mã hoá prompt bằng encodeURIComponent()
+    const encodedPrompt = encodeURIComponent(promptText);
+
+    // Tạo URL ảnh tĩnh qua Pollinations.ai
+    const finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=1000&nologo=true`;
+
+    return res.json({
+      success: true,
+      imageUrl: finalImageUrl,
+      image_url: finalImageUrl,
+      prompt_used: promptText,
     });
   } catch (error: any) {
     console.error('Outfit image generation server error:', error);
     return res.status(500).json({
       error: error?.message || 'Lỗi máy chủ không xác định khi tạo ảnh.',
-      status: 500,
     });
   }
 });

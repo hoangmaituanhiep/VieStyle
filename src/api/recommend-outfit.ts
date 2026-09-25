@@ -177,11 +177,11 @@ ${mixHistoryText}
 ${JSON.stringify(catalogSummary, null, 2)}
 `;
 
-    // Gọi bản flash thay vì pro
+    // Gọi bản gemini-3.8-flash
     let response;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.8-flash',
         contents: userPrompt,
         config: {
           systemInstruction,
@@ -206,9 +206,8 @@ ${JSON.stringify(catalogSummary, null, 2)}
       });
     } catch (genaiErr: any) {
       console.error('Call to Gemini Flash failed:', genaiErr?.message);
-      return res.status(503).json({
-        error: 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
-        details: genaiErr?.message,
+      return res.status(500).json({
+        error: genaiErr?.message || 'Lỗi máy chủ',
       });
     }
 
@@ -242,15 +241,15 @@ ${JSON.stringify(catalogSummary, null, 2)}
       success: true,
       cached: false,
       recommendation: parsed,
-      engine: 'gemini-2.5-flash',
+      engine: 'gemini-3.8-flash',
     });
   } catch (error: any) {
     // =========================================================================
     // BƯỚC 3: ERROR HANDLING
     // =========================================================================
     console.error('Pages route exception caught:', error?.message);
-    return res.status(503).json({
-      error: error?.message || 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
+    return res.status(500).json({
+      error: error?.message || 'Lỗi máy chủ',
     });
   }
 }
