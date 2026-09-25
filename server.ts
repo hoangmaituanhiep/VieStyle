@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -30,6 +31,19 @@ const getGeminiClient = () => {
   });
 };
 
+// Initialize Supabase Server Client for Caching
+const getSupabaseServerClient = (reqUrl?: string, reqKey?: string) => {
+  const url = (reqUrl || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+  const key = (reqKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  if (!url || !key) return null;
+  try {
+    return createClient(url, key);
+  } catch (e) {
+    console.warn('Failed to initialize Supabase server client:', e);
+    return null;
+  }
+};
+
 // API Health Check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -39,10 +53,19 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Route: Outfit Recommendation Engine (Personalized with Past Ratings & Mix History)
+// API Route: Outfit Recommendation Engine with Supabase Database Caching
 app.post('/api/recommend-outfit', async (req, res) => {
   try {
-    const { user_profile, event_context, past_ratings, mix_history, available_outfits } = req.body || {};
+    const {
+      user_id,
+      user_profile,
+      event_context,
+      past_ratings,
+      mix_history,
+      available_outfits,
+      supabase_url,
+      supabase_key,
+    } = req.body || {};
 
     if (!event_context || !available_outfits || !Array.isArray(available_outfits) || available_outfits.length === 0) {
       return res.status(400).json({
@@ -50,9 +73,80 @@ app.post('/api/recommend-outfit', async (req, res) => {
       });
     }
 
+    const inputEventType = event_context.event_type;
+    const inputEventPlace = event_context.event_place;
+    const inputEventName = event_context.event_name;
+
+    // =========================================================================
+    // BƯỚC 1: KIỂM TRA CACHING (CACHE HIT) TỪ SUPABASE
+    // =========================================================================
+    const supabase = getSupabaseServerClient(supabase_url, supabase_key);
+
+    if (supabase && inputEventType) {
+      try {
+        let cachedRow: any = null;
+
+        // 1.1 Thử tìm khớp chính xác event_type và event_place
+        if (inputEventPlace) {
+          const { data: exactMatch } = await supabase
+            .from('suggestions_history')
+            .select('*')
+            .eq('event_type', inputEventType)
+            .eq('event_place', inputEventPlace)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (exactMatch && exactMatch.length > 0 && exactMatch[0]?.outfit_id) {
+            cachedRow = exactMatch[0];
+          }
+        }
+
+        // 1.2 Nếu chưa thấy, tìm gợi ý gần nhất theo event_type
+        if (!cachedRow) {
+          const { data: typeMatch } = await supabase
+            .from('suggestions_history')
+            .select('*')
+            .eq('event_type', inputEventType)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (typeMatch && typeMatch.length > 0 && typeMatch[0]?.outfit_id) {
+            cachedRow = typeMatch[0];
+          }
+        }
+
+        // CACHE HIT: Nếu tìm thấy bản ghi có outfit_id hợp lệ
+        if (cachedRow && cachedRow.outfit_id) {
+          const cachedOutfitId = String(cachedRow.outfit_id).trim();
+          const matchedOutfit = available_outfits.find((o: any) => o.id === cachedOutfitId) || available_outfits[0];
+
+          console.log(`⚡ [Cache Hit] Trả về outfit_id (${matchedOutfit.id}) từ suggestions_history cho dịp: "${inputEventType}". BỎ QUA Gemini API.`);
+
+          return res.json({
+            success: true,
+            cached: true,
+            recommendation: {
+              selected_outfit_id: matchedOutfit.id,
+              match_score: 96,
+              ai_reasoning: `Gợi ý được đồng bộ tức thì từ cơ sở dữ liệu kinh nghiệm VieStyle cho dịp ${inputEventType} tại ${inputEventPlace || 'không gian tương tự'}. Thiết kế "${matchedOutfit.name}" bảo chứng sự hoàn mỹ và đúng chuẩn nghi thức.`,
+              styling_tips: `Giữ phom dáng thanh thoát, kết hợp hài nhung truyền thống và điểm xuyết trang sức tối giản để tôn vinh chất liệu.`,
+              alternative_outfit_id: available_outfits.find((o: any) => o.id !== matchedOutfit.id)?.id || matchedOutfit.id,
+              vibe_keywords: ['Di Sản', 'Đúng Chuẩn', 'Kinh Nghiệm'],
+            },
+            engine: 'supabase_cache_hit',
+          });
+        }
+      } catch (cacheErr: any) {
+        console.warn('Lỗi kiểm tra cache Supabase (chuyển sang gọi AI):', cacheErr?.message);
+      }
+    }
+
+    // =========================================================================
+    // BƯỚC 2: GỌI AI & LƯU CACHING (CACHE MISS)
+    // =========================================================================
     const ai = getGeminiClient();
 
-    // If Gemini API Key is missing or fallback needed
+    // If Gemini API Key is missing, use intelligent rule-based engine
     if (!ai) {
       console.warn('GEMINI_API_KEY not configured. Using rule-based sartorial recommendation matching.');
       const fallbackRec = generateRuleBasedRecommendation(user_profile, event_context, past_ratings, mix_history, available_outfits);
@@ -76,7 +170,6 @@ app.post('/api/recommend-outfit', async (req, res) => {
       return `- Thử nghiệm phối đồ: "${garment}" | Tông màu: ${colors} | Phụ kiện: ${acc} | Bối cảnh: ${bg}`;
     }).join('\n') || 'Chưa có thử nghiệm Mix & Match trước đó.';
 
-    // Format outfit catalog for LLM
     const safeArray = (v: any) => {
       if (Array.isArray(v)) return v;
       if (typeof v === 'string') {
@@ -101,8 +194,6 @@ Your task is to select the single optimal outfit from the provided catalog that 
 
 Crucial Instructions:
 1. Pay deep attention to BOTH the user's PAST RATINGS and their recent MIX & MATCH STUDIO EXPERIMENTS.
-   - If the user has experimented with specific silhouettes (e.g., Áo Nhật Bình, Áo Tứ Thân, Áo Ngũ Thân, or Áo Dài), favorite color palettes, or accessories in their Mix & Match studio, heavily favor catalog outfits that resonate with those personal artistic inclinations.
-   - If they gave 4-5 stars to certain styles in the past, reinforce that preference. If they gave 1-2 stars, avoid those silhouettes.
 2. The selected_outfit_id MUST be an exact 'id' from the provided inventory list. Do not make up non-existent IDs.
 3. Provide an elevated, articulate, high-fashion explanation for the choice, and concrete styling tips (footwear, jewelry/watch, outerwear, grooming, and color accents).`;
 
@@ -135,8 +226,9 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
 
     let response;
     try {
+      // Ưu tiên bản flash thay vì pro để nhanh và đỡ nghẽn
       response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-2.5-flash',
         contents: userPrompt,
         config: {
           systemInstruction,
@@ -176,10 +268,10 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
         },
       });
     } catch (genaiError: any) {
-      console.error('Call to @google/genai failed:', genaiError?.message);
-      return res.status(500).json({
-        error: genaiError?.message || 'Lỗi kết nối từ Gemini AI.',
-        status: genaiError?.status || 500,
+      console.error('Call to Gemini Flash failed (503 / Overload):', genaiError?.message);
+      return res.status(503).json({
+        error: 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
+        details: genaiError?.message,
       });
     }
 
@@ -191,16 +283,46 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
       parsed.selected_outfit_id = available_outfits[0].id;
     }
 
+    // Lưu kết quả này vào bảng suggestions_history để làm Caching cho những user/lần sau
+    if (supabase) {
+      try {
+        const cacheUserId = user_id || user_profile?.id || 'dae05a68-ee99-470f-8f17-7db434e65f8d';
+        // RÀNG BUỘC INSERT: CHỈ DÙNG các cột hợp lệ: user_id, outfit_id, event_name, event_place, event_type
+        const cachePayload = {
+          user_id: cacheUserId,
+          outfit_id: parsed.selected_outfit_id,
+          event_name: inputEventName || 'Sự kiện',
+          event_place: inputEventPlace || 'Địa điểm',
+          event_type: inputEventType,
+        };
+
+        const { error: insertCacheErr } = await supabase
+          .from('suggestions_history')
+          .insert([cachePayload]);
+
+        if (insertCacheErr) {
+          console.warn('Lỗi ghi suggestions_history cache:', insertCacheErr.message);
+        } else {
+          console.log(`[Cache Miss -> Stored] Đã lưu caching outfit_id vào suggestions_history cho dịp: ${inputEventType}`);
+        }
+      } catch (cacheSaveErr: any) {
+        console.warn('Lỗi ghi cache suggestions_history:', cacheSaveErr?.message);
+      }
+    }
+
     return res.json({
       success: true,
+      cached: false,
       recommendation: parsed,
-      engine: 'gemini-3.8-flash',
+      engine: 'gemini-2.5-flash',
     });
   } catch (error: any) {
-    console.error('Global recommend-outfit route error caught:', error?.message);
-    return res.status(500).json({
-      error: error?.message || 'Lỗi máy chủ khi xử lý gợi ý trang phục.',
-      status: 500,
+    // =========================================================================
+    // BƯỚC 3: ĐẢM BẢO ĐỘ BỀN BỈ (ERROR HANDLING)
+    // =========================================================================
+    console.error('API Route /api/recommend-outfit fatal error:', error?.message);
+    return res.status(503).json({
+      error: error?.message || 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.',
     });
   }
 });

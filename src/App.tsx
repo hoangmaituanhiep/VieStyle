@@ -26,6 +26,7 @@ import {
   getAuthSession,
   signOutSupabase,
   getSupabaseClient,
+  getStoredSupabaseConfig,
   subscribeToAuthChanges,
 } from './lib/supabase';
 
@@ -187,16 +188,21 @@ export default function App() {
           rating: h.rating as number,
         }));
 
-      // Call Full-Stack Backend API route (/api/recommend-outfit) with mix_history personalization
+      const storedConfig = getStoredSupabaseConfig();
+
+      // Call Full-Stack Backend API route (/api/recommend-outfit) with Supabase Caching
       const res = await fetch('/api/recommend-outfit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          user_id: user?.id,
           user_profile: activePrefs,
           event_context: eventContext,
           past_ratings: pastRatingsSummary,
           mix_history: mixHistory,
           available_outfits: outfits,
+          supabase_url: storedConfig.url,
+          supabase_key: storedConfig.key,
         }),
       });
 
@@ -237,14 +243,30 @@ export default function App() {
       }
 
       // Save suggestion in Supabase suggestions_history (CHỈ lưu các cột có trong DB)
-      const newRecord = await saveSuggestion({
-        user_id: user.id,
-        outfit_id: targetOutfitId,
-        event_name: eventContext.event_name,
-        event_place: eventContext.event_place,
-        event_type: eventContext.event_type,
-        rating: null,
-      });
+      let newRecord: SuggestionHistory;
+      try {
+        newRecord = await saveSuggestion({
+          user_id: user.id,
+          outfit_id: targetOutfitId,
+          event_name: eventContext.event_name,
+          event_place: eventContext.event_place,
+          event_type: eventContext.event_type,
+          rating: null,
+        });
+      } catch (saveErr) {
+        console.warn('saveSuggestion non-blocking warning:', saveErr);
+        newRecord = {
+          id: 'temp-' + Date.now(),
+          user_id: user.id,
+          outfit_id: targetOutfitId,
+          event_name: eventContext.event_name,
+          event_place: eventContext.event_place,
+          event_type: eventContext.event_type,
+          rating: null,
+          created_at: new Date().toISOString(),
+          outfit: matchedOutfit || outfits[0],
+        };
+      }
 
       // Gắn thông tin reasoning & styling tips trên giao diện (UI) cho người dùng xem, KHÔNG lưu vào DB
       const displayRecord: SuggestionHistory = {
@@ -259,7 +281,11 @@ export default function App() {
       setLatestSuggestion(displayRecord);
       setActiveTab('dashboard');
 
-      showNotification('Gợi ý trang phục đã được phân tích và đồng bộ.');
+      if (data.cached) {
+        showNotification('Gợi ý trang phục tức thì từ bộ nhớ đệm (Cache Hit)!');
+      } else {
+        showNotification('Gợi ý trang phục đã được phân tích và đồng bộ.');
+      }
     } catch (err: any) {
       console.error('Styling error:', err);
       const is503 =
