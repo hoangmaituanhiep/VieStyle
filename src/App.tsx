@@ -54,7 +54,8 @@ export default function App() {
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ text, type });
-    setTimeout(() => setNotification(null), 3500);
+    const duration = type === 'error' ? 5000 : 3500;
+    setTimeout(() => setNotification(null), duration);
   };
 
   // Helper to load authenticated user's preferences & history
@@ -199,8 +200,26 @@ export default function App() {
         }),
       });
 
+      // BẮT BUỘC kiểm tra Content-Type trước khi gọi await res.json() để tránh lỗi HTML crash
+      if (!res.headers.get('content-type')?.includes('application/json')) {
+        throw new Error('API không trả về JSON');
+      }
+
       if (!res.ok) {
-        throw new Error(`Lỗi máy chủ AI: ${res.statusText}`);
+        const errData = await res.json().catch(() => ({}));
+        const errMessage = errData?.error || `Lỗi máy chủ AI (${res.status})`;
+
+        if (
+          res.status === 503 ||
+          errMessage.includes('503') ||
+          errMessage.toLowerCase().includes('quá tải') ||
+          errMessage.toLowerCase().includes('high demand') ||
+          errMessage.toLowerCase().includes('overloaded')
+        ) {
+          throw new Error('Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.');
+        }
+
+        throw new Error(errMessage);
       }
 
       const data = await res.json();
@@ -210,28 +229,52 @@ export default function App() {
         throw new Error('Không nhận được gợi ý hợp lệ.');
       }
 
-      // Save suggestion in Supabase suggestions_history
+      // Đảm bảo outfit_id là string UUID hợp lệ của trang phục có trong kho
+      let targetOutfitId = String(rec.selected_outfit_id || '').trim();
+      const matchedOutfit = outfits.find((o) => o.id === targetOutfitId);
+      if (!matchedOutfit && outfits.length > 0) {
+        targetOutfitId = outfits[0].id;
+      }
+
+      // Save suggestion in Supabase suggestions_history (CHỈ lưu các cột có trong DB)
       const newRecord = await saveSuggestion({
         user_id: user.id,
-        outfit_id: rec.selected_outfit_id,
+        outfit_id: targetOutfitId,
         event_name: eventContext.event_name,
         event_place: eventContext.event_place,
         event_type: eventContext.event_type,
         rating: null,
-        ai_reasoning: rec.ai_reasoning,
-        styling_tips: rec.styling_tips,
       });
 
+      // Gắn thông tin reasoning & styling tips trên giao diện (UI) cho người dùng xem, KHÔNG lưu vào DB
+      const displayRecord: SuggestionHistory = {
+        ...newRecord,
+        ai_reasoning: rec.ai_reasoning || '',
+        styling_tips: rec.styling_tips || '',
+      };
+
       // Update state
-      const updatedHistory = [newRecord, ...history];
+      const updatedHistory = [displayRecord, ...history];
       setHistory(updatedHistory);
-      setLatestSuggestion(newRecord);
+      setLatestSuggestion(displayRecord);
       setActiveTab('dashboard');
 
       showNotification('Gợi ý trang phục đã được phân tích và đồng bộ.');
     } catch (err: any) {
       console.error('Styling error:', err);
-      showNotification(err?.message || 'Không thể tạo gợi ý trang phục. Vui lòng thử lại.', 'error');
+      const is503 =
+        err?.status === 503 ||
+        err?.message?.includes('503') ||
+        err?.message?.toLowerCase()?.includes('quá tải') ||
+        err?.message?.toLowerCase()?.includes('high demand') ||
+        err?.message?.toLowerCase()?.includes('overloaded') ||
+        err?.message?.toLowerCase()?.includes('resource_exhausted');
+
+      const userMessage = is503
+        ? 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.'
+        : (err?.message || 'Không thể tạo gợi ý trang phục. Vui lòng thử lại.');
+
+      showNotification(userMessage, 'error');
     } finally {
       setIsLoadingAI(false);
     }

@@ -270,20 +270,41 @@ export async function fetchSuggestionsHistory(userId: string): Promise<Suggestio
   if (!client) return [];
 
   try {
+    // Sử dụng đúng cú pháp join .select('*, outfits(*)') vì Foreign Key (outfit_id -> outfits.id) đã tồn tại
     const { data, error } = await client
       .from('suggestions_history')
-      .select('*, outfit:outfits(*)')
+      .select('*, outfits(*)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      return data.map((item: any) => ({
-        ...item,
-        outfit: item.outfit ? parseOutfitRow(item.outfit) : undefined,
-      })) as SuggestionHistory[];
+      return data.map((item: any) => {
+        const outfitRaw = Array.isArray(item.outfits) ? item.outfits[0] : (item.outfits || item.outfit);
+        return {
+          ...item,
+          outfit: outfitRaw ? parseOutfitRow(outfitRaw) : undefined,
+        };
+      }) as SuggestionHistory[];
+    }
+
+    if (error) {
+      console.warn('Supabase join query error (PGRST200 hoặc schema cache), fallback sang query select(*):', error);
+      // Query an toàn fallback nếu cache foreign key chưa đồng bộ
+      const fallbackRes = await client
+        .from('suggestions_history')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (!fallbackRes.error && fallbackRes.data) {
+        return fallbackRes.data.map((item: any) => ({
+          ...item,
+          outfit: undefined,
+        })) as SuggestionHistory[];
+      }
     }
   } catch (err) {
-    console.warn('Supabase fetch history error:', err);
+    console.warn('Supabase fetch history exception:', err);
   }
   return [];
 }
@@ -294,32 +315,58 @@ export async function saveSuggestion(suggestion: Omit<SuggestionHistory, 'id' | 
     throw new Error('Supabase client is not connected. Please sign in and connect Supabase.');
   }
 
-  const { data, error } = await client
-    .from('suggestions_history')
-    .insert([
-      {
-        user_id: suggestion.user_id,
-        outfit_id: suggestion.outfit_id,
-        event_name: suggestion.event_name,
-        event_place: suggestion.event_place,
-        event_type: suggestion.event_type,
-        rating: suggestion.rating ?? null,
-        ai_reasoning: suggestion.ai_reasoning ?? '',
-        styling_tips: suggestion.styling_tips ?? '',
-      },
-    ])
-    .select('*, outfit:outfits(*)')
-    .single();
-
-  if (error) {
-    console.error('Failed to save suggestion to Supabase:', error);
-    throw error;
+  // Đảm bảo outfit_id truyền lên là string UUID hợp lệ của trang phục
+  const outfitId = String(suggestion.outfit_id || '').trim();
+  if (!outfitId) {
+    throw new Error('Mã outfit_id không hợp lệ (yêu cầu UUID trang phục).');
   }
 
-  return {
-    ...data,
-    outfit: data.outfit ? parseOutfitRow(data.outfit) : undefined,
-  } as SuggestionHistory;
+  // Bảng suggestions_history CHỈ CÓ các cột: user_id, outfit_id, event_name, event_place, event_type, rating
+  const payload = {
+    user_id: suggestion.user_id,
+    outfit_id: outfitId,
+    event_name: suggestion.event_name,
+    event_place: suggestion.event_place,
+    event_type: suggestion.event_type,
+    rating: suggestion.rating ?? null,
+  };
+
+  try {
+    const { data, error } = await client
+      .from('suggestions_history')
+      .insert([payload])
+      .select('*, outfits(*)')
+      .single();
+
+    if (error) {
+      console.warn('Lỗi khi insert với join .select(*, outfits(*)), fallback sang .select(*):', error);
+      const fallback = await client
+        .from('suggestions_history')
+        .insert([payload])
+        .select('*')
+        .single();
+
+      if (fallback.error) {
+        console.error('Failed to save suggestion to Supabase:', fallback.error);
+        throw fallback.error;
+      }
+
+      return {
+        ...fallback.data,
+        outfit: undefined,
+      } as SuggestionHistory;
+    }
+
+    const outfitRaw = Array.isArray(data.outfits) ? data.outfits[0] : (data.outfits || data.outfit);
+
+    return {
+      ...data,
+      outfit: outfitRaw ? parseOutfitRow(outfitRaw) : undefined,
+    } as SuggestionHistory;
+  } catch (err) {
+    console.error('Save suggestion exception:', err);
+    throw err;
+  }
 }
 
 export async function updateSuggestionRating(id: string, rating: number): Promise<boolean> {

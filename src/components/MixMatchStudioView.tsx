@@ -150,8 +150,15 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
         }),
       });
 
+      // BẮT BUỘC kiểm tra Content-Type trước khi gọi await res.json()
+      if (!res.headers.get('content-type')?.includes('application/json')) {
+        throw new Error('API không trả về JSON (HTTP ' + res.status + ')');
+      }
+
       if (!res.ok) {
-        throw new Error(`Lỗi máy chủ (${res.status}): Không thể tạo ảnh.`);
+        const errData = await res.json().catch(() => ({}));
+        const errMessage = errData?.error || `Google Imagen API HTTP ${res.status}`;
+        throw new Error(errMessage);
       }
 
       const data = await res.json();
@@ -159,10 +166,12 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
         throw new Error(data.error || 'Không nhận được dữ liệu hình ảnh.');
       }
 
+      setGenerationError(null);
+
       const newResult = {
         imageUrl: data.image_url,
         promptUsed: data.prompt_used || '',
-        model: data.model || 'gemini-3.1-flash-image',
+        model: data.model || 'imagen-3.0-generate-001',
         isSaved: false,
       };
 
@@ -183,8 +192,9 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
         setGeneratedResult({ ...newResult, isSaved: true });
       }
     } catch (err: any) {
-      console.error('Image generation error:', err);
-      setGenerationError(err?.message || 'Không thể tạo hình ảnh. Vui lòng thử lại.');
+      console.warn('Image generation error:', err?.message);
+      setGenerationError(err?.message || 'Không thể tạo hình ảnh.');
+      setGeneratedResult(null);
     } finally {
       setIsGenerating(false);
     }
@@ -474,12 +484,6 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
                 </>
               )}
             </button>
-
-            {generationError && (
-              <div className="mt-3 p-3 text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-sm">
-                {generationError}
-              </div>
-            )}
           </div>
         </div>
 
@@ -493,19 +497,19 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
               </span>
             </div>
 
-            {/* Visual Box with aspect-[3/4] */}
-            <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xs bg-[#EAE3D6] border border-[#E3D9C8]">
+            {/* Visual Box with square aspect ratio */}
+            <div className="relative aspect-square w-full overflow-hidden rounded-xs bg-[#FAF7F2] border border-[#E3D9C8] flex items-center justify-center">
               {isGenerating ? (
-                <div className="w-full h-full flex flex-col items-center justify-center p-6 space-y-4 bg-[#EDE6DB]/80 backdrop-blur-xs">
-                  <div className="w-12 h-12 rounded-full border-2 border-[#8B1E1E] border-t-transparent animate-spin" />
-                  <div className="text-center space-y-1">
-                    <p className="font-serif text-[#141210] font-medium text-base">
-                      Đang Tạo Tạo Tác Phục Trang
-                    </p>
-                    <p className="text-[11px] font-mono text-[#78716A]">
-                      Google Gemini Image Model
-                    </p>
-                  </div>
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
+                  <p className="font-serif text-xs text-[#78716A] tracking-wider animate-pulse">
+                    Đang tạo ảnh AI...
+                  </p>
+                </div>
+              ) : generationError ? (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-[#FAF7F2]">
+                  <p className="font-mono text-xs text-[#8B1E1E] leading-relaxed max-w-[280px] break-words">
+                    {generationError}
+                  </p>
                 </div>
               ) : generatedResult ? (
                 <img
@@ -515,11 +519,11 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
                 />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#FAF7F2]">
-                  <div className="w-12 h-12 rounded-full border border-[#EBE4D8] flex items-center justify-center bg-[#FFFFFF] text-[#8B1E1E] shadow-2xs">
-                    <Sparkles className="w-5 h-5" />
+                  <div className="w-10 h-10 rounded-full border border-[#EBE4D8] flex items-center justify-center bg-[#FFFFFF] text-[#8B1E1E] shadow-2xs">
+                    <Sparkles className="w-4 h-4" />
                   </div>
                   <div className="space-y-1">
-                    <p className="font-serif text-sm font-medium text-[#141210]">
+                    <p className="font-serif text-xs font-medium text-[#141210]">
                       Mix & Match Studio
                     </p>
                     <p className="text-[10px] font-mono text-[#78716A] uppercase tracking-wider">

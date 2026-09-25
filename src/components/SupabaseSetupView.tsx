@@ -62,8 +62,6 @@ CREATE TABLE IF NOT EXISTS public.suggestions_history (
   event_place TEXT NOT NULL,
   event_type TEXT NOT NULL,
   rating SMALLINT CHECK (rating >= 1 AND rating <= 5),
-  ai_reasoning TEXT,
-  styling_tips TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -1,14 +1,13 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// CommonJS build compatibility (avoid import.meta warning in CJS format)
+const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 const app = express();
 const PORT = 3000;
@@ -43,7 +42,7 @@ app.get('/api/health', (req, res) => {
 // API Route: Outfit Recommendation Engine (Personalized with Past Ratings & Mix History)
 app.post('/api/recommend-outfit', async (req, res) => {
   try {
-    const { user_profile, event_context, past_ratings, mix_history, available_outfits } = req.body;
+    const { user_profile, event_context, past_ratings, mix_history, available_outfits } = req.body || {};
 
     if (!event_context || !available_outfits || !Array.isArray(available_outfits) || available_outfits.length === 0) {
       return res.status(400).json({
@@ -134,46 +133,55 @@ ${JSON.stringify(catalogSummary, null, 2)}
 Analyze the inventory, cross-reference the event venue, past user ratings, and mix & match styling history. Select the optimal outfit ID, and return the structured recommendation.
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction,
-        temperature: 0.65,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            selected_outfit_id: {
-              type: Type.STRING,
-              description: 'The exact ID of the best matching outfit from the provided catalog',
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: userPrompt,
+        config: {
+          systemInstruction,
+          temperature: 0.65,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              selected_outfit_id: {
+                type: Type.STRING,
+                description: 'The exact ID of the best matching outfit from the provided catalog',
+              },
+              match_score: {
+                type: Type.INTEGER,
+                description: 'Sartorial compatibility score between 80 and 99',
+              },
+              ai_reasoning: {
+                type: Type.STRING,
+                description: 'Expert fashion rationale explaining why this piece fits the venue, event type, personal aesthetic, past ratings, and mix & match history',
+              },
+              styling_tips: {
+                type: Type.STRING,
+                description: 'Actionable high-fashion styling advice on footwear, jewelry, layering, and color harmony',
+              },
+              alternative_outfit_id: {
+                type: Type.STRING,
+                description: 'A second viable alternative outfit ID from the catalog',
+              },
+              vibe_keywords: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '3-4 concise aesthetic keywords describing the look',
+              },
             },
-            match_score: {
-              type: Type.INTEGER,
-              description: 'Sartorial compatibility score between 80 and 99',
-            },
-            ai_reasoning: {
-              type: Type.STRING,
-              description: 'Expert fashion rationale explaining why this piece fits the venue, event type, personal aesthetic, past ratings, and mix & match history',
-            },
-            styling_tips: {
-              type: Type.STRING,
-              description: 'Actionable high-fashion styling advice on footwear, jewelry, layering, and color harmony',
-            },
-            alternative_outfit_id: {
-              type: Type.STRING,
-              description: 'A second viable alternative outfit ID from the catalog',
-            },
-            vibe_keywords: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '3-4 concise aesthetic keywords describing the look',
-            },
+            required: ['selected_outfit_id', 'match_score', 'ai_reasoning', 'styling_tips'],
           },
-          required: ['selected_outfit_id', 'match_score', 'ai_reasoning', 'styling_tips'],
         },
-      },
-    });
+      });
+    } catch (genaiError: any) {
+      console.error('Call to @google/genai failed:', genaiError?.message);
+      return res.status(500).json({
+        error: genaiError?.message || 'Lỗi kết nối từ Gemini AI.',
+        status: genaiError?.status || 500,
+      });
+    }
 
     const parsed = JSON.parse(response.text || '{}');
 
@@ -189,19 +197,10 @@ Analyze the inventory, cross-reference the event venue, past user ratings, and m
       engine: 'gemini-3.8-flash',
     });
   } catch (error: any) {
-    console.error('Gemini recommendation error:', error);
-    // Fallback to intelligent rule-based engine on error so user is never blocked
-    const fallback = generateRuleBasedRecommendation(
-      req.body.user_profile,
-      req.body.event_context,
-      req.body.past_ratings,
-      req.body.mix_history,
-      req.body.available_outfits
-    );
-    return res.json({
-      ...fallback,
-      engine: 'fallback_heuristic',
-      notice: 'Generated using sartorial heuristics engine.',
+    console.error('Global recommend-outfit route error caught:', error?.message);
+    return res.status(500).json({
+      error: error?.message || 'Lỗi máy chủ khi xử lý gợi ý trang phục.',
+      status: 500,
     });
   }
 });
@@ -214,7 +213,7 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Google Gemini / Imagen API)
+// API Route: AI Mix & Match Image Generation (Calls Google Imagen 3 API with proper error reporting - NO MOCK IMAGE)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
@@ -224,7 +223,7 @@ app.post('/api/generate-outfit-image', async (req, res) => {
       secondary_color,
       background_vibe,
       style_notes,
-    } = req.body;
+    } = req.body || {};
 
     if (!garment_type || !primary_color) {
       return res.status(400).json({ error: 'Thiếu thông tin bắt buộc: garment_type hoặc primary_color.' });
@@ -232,14 +231,11 @@ app.post('/api/generate-outfit-image', async (req, res) => {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
+      console.error('Lỗi server: Chưa cấu hình GEMINI_API_KEY.');
       return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm key trong bảng Settings > Secrets.',
+        error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ.',
+        status: 500,
       });
-    }
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(500).json({ error: 'Không thể khởi tạo Google GenAI client.' });
     }
 
     const accessoriesText = Array.isArray(accessories) && accessories.length > 0
@@ -255,76 +251,115 @@ app.post('/api/generate-outfit-image', async (req, res) => {
     // Crafted high-fashion editorial prompt for authentic Vietnamese traditional attire
     const editorialPrompt = `A high-fashion magazine editorial full-length photograph of an elegant Vietnamese fashion model wearing authentic high-couture Vietnamese traditional costume: ${garment_type}. The garment is crafted in exquisite raw silk and brocade in ${colorScheme}. Styled with traditional Vietnamese accessories: ${accessoriesText}. Set against ${settingText} with soft directional daylight, subtle shadows, realistic silk texture drapery, cinematic lighting, 8k resolution, minimalist Vogue editorial aesthetics, hyper-detailed photography, authentic Vietnamese cultural heritage. ${style_notes || ''}`.trim();
 
-    let generatedImageUrl = '';
-    let usedModel = 'gemini-3.1-flash-image';
+    // 1. Direct REST API call to Google Imagen 3 endpoint
+    const imagenEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages?key=${apiKey}`;
 
-    // Attempt generation with gemini-3.1-flash-image
+    console.log('Sending REST request to Imagen 3 endpoint:', imagenEndpoint);
+
+    let lastErrorMessage = '';
+    let lastStatusCode = 500;
+
     try {
-      const aiResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image',
-        contents: {
-          parts: [{ text: editorialPrompt }],
+      const imagenResponse = await fetch(imagenEndpoint, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
         },
-        config: {
-          imageConfig: {
-            aspectRatio: '3:4',
-          },
-        },
+        body: JSON.stringify({
+          prompt: editorialPrompt,
+          numberOfImages: 1,
+        }),
       });
 
-      for (const part of aiResponse.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData?.data) {
-          generatedImageUrl = `data:${part.inlineData.mimeType || 'image/jpeg'};base64,${part.inlineData.data}`;
-          break;
+      if (imagenResponse.ok) {
+        const data: any = await imagenResponse.json();
+        const base64Bytes =
+          data?.generatedImages?.[0]?.image?.imageBytes ||
+          data?.generatedImages?.[0]?.imageBytes ||
+          data?.predictions?.[0]?.bytesBase64Encoded ||
+          data?.predictions?.[0]?.image?.imageBytes;
+
+        if (base64Bytes) {
+          const generatedImageUrl = typeof base64Bytes === 'string' && base64Bytes.startsWith('data:')
+            ? base64Bytes
+            : `data:image/jpeg;base64,${base64Bytes}`;
+
+          return res.json({
+            success: true,
+            image_url: generatedImageUrl,
+            prompt_used: editorialPrompt,
+            model: 'imagen-3.0-generate-001',
+            garment_type,
+            accessories: Array.isArray(accessories) ? accessories : [],
+            primary_color,
+            secondary_color: secondary_color || null,
+            background_vibe: settingText,
+          });
+        }
+      } else {
+        lastStatusCode = imagenResponse.status;
+        try {
+          const errJson = await imagenResponse.json();
+          lastErrorMessage = errJson?.error?.message || errJson?.message || `Google Imagen API HTTP ${imagenResponse.status}`;
+        } catch {
+          const errText = await imagenResponse.text().catch(() => '');
+          lastErrorMessage = errText || `Google Imagen API HTTP ${imagenResponse.status}`;
         }
       }
-    } catch (primaryErr: any) {
-      console.warn('Primary model (gemini-3.1-flash-image) attempt notice:', primaryErr?.message);
-      
-      // Fallback attempt with gemini-2.5-flash-image
+    } catch (fetchErr: any) {
+      lastErrorMessage = fetchErr?.message || 'Lỗi kết nối khi gọi Imagen API';
+    }
+
+    // 2. Fallback attempt with Gemini image generation
+    const ai = getGeminiClient();
+    if (ai) {
       try {
-        usedModel = 'gemini-2.5-flash-image';
-        const fallbackResponse = await ai.models.generateContent({
+        console.log('Attempting Gemini image generation model fallback...');
+        const fallbackRes = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
             parts: [{ text: editorialPrompt }],
           },
         });
 
-        for (const part of fallbackResponse.candidates?.[0]?.content?.parts || []) {
+        for (const part of fallbackRes.candidates?.[0]?.content?.parts || []) {
           if (part.inlineData?.data) {
-            generatedImageUrl = `data:${part.inlineData.mimeType || 'image/jpeg'};base64,${part.inlineData.data}`;
-            break;
+            const generatedImageUrl = `data:${part.inlineData.mimeType || 'image/jpeg'};base64,${part.inlineData.data}`;
+            return res.json({
+              success: true,
+              image_url: generatedImageUrl,
+              prompt_used: editorialPrompt,
+              model: 'gemini-2.5-flash-image',
+              garment_type,
+              accessories: Array.isArray(accessories) ? accessories : [],
+              primary_color,
+              secondary_color: secondary_color || null,
+              background_vibe: settingText,
+            });
           }
         }
-      } catch (fallbackErr: any) {
-        console.error('Fallback model generation error:', fallbackErr?.message);
-        throw new Error(
-          primaryErr?.message?.includes('quota') || primaryErr?.message?.includes('RESOURCE_EXHAUSTED')
-            ? 'Đã vượt hạn mức gọi API tạo ảnh Google Gemini. Vui lòng kiểm tra gói dịch vụ hoặc kích hoạt Billing.'
-            : (primaryErr?.message || 'Không thể tạo hình ảnh qua Google Gemini API.')
-        );
+      } catch (geminiImgErr: any) {
+        console.warn('Gemini image model fallback error:', geminiImgErr?.message);
+        if (!lastErrorMessage) {
+          lastErrorMessage = geminiImgErr?.message || 'Lỗi tạo hình ảnh.';
+        }
       }
     }
 
-    if (!generatedImageUrl) {
-      throw new Error('Mô hình Google Gemini không trả về dữ liệu ảnh hợp lệ.');
-    }
-
-    return res.json({
-      success: true,
-      image_url: generatedImageUrl,
-      prompt_used: editorialPrompt,
-      model: usedModel,
-      garment_type,
-      accessories: Array.isArray(accessories) ? accessories : [],
-      primary_color,
-      secondary_color: secondary_color || null,
-      background_vibe: settingText,
+    // No mock images! Return explicit error to be displayed in the UI box
+    const formattedError = `Google Imagen API HTTP ${lastStatusCode}: ${lastErrorMessage || 'Endpoint không khả dụng'}`;
+    console.error('Image generation failed with error:', formattedError);
+    return res.status(lastStatusCode).json({
+      error: formattedError,
+      status: lastStatusCode,
     });
   } catch (error: any) {
-    console.error('Outfit image generation error:', error);
-    return res.status(500).json({ error: error?.message || 'Failed to generate outfit image.' });
+    console.error('Outfit image generation server error:', error);
+    return res.status(500).json({
+      error: error?.message || 'Lỗi máy chủ không xác định khi tạo ảnh.',
+      status: 500,
+    });
   }
 });
 
