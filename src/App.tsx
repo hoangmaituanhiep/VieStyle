@@ -229,14 +229,14 @@ export default function App() {
       }
 
       const data = await res.json();
-      const rec = data.recommendation;
+      const rawOutfitId = data.outfit_id || data.recommendation?.selected_outfit_id;
 
-      if (!rec || !rec.selected_outfit_id) {
+      if (!rawOutfitId) {
         throw new Error('Không nhận được gợi ý hợp lệ.');
       }
 
       // Đảm bảo outfit_id là string UUID hợp lệ của trang phục có trong kho
-      let targetOutfitId = String(rec.selected_outfit_id || '').trim();
+      let targetOutfitId = String(rawOutfitId).trim();
       const matchedOutfit = outfits.find((o) => o.id === targetOutfitId);
       if (!matchedOutfit && outfits.length > 0) {
         targetOutfitId = outfits[0].id;
@@ -271,8 +271,8 @@ export default function App() {
       // Gắn thông tin reasoning & styling tips trên giao diện (UI) cho người dùng xem, KHÔNG lưu vào DB
       const displayRecord: SuggestionHistory = {
         ...newRecord,
-        ai_reasoning: rec.ai_reasoning || '',
-        styling_tips: rec.styling_tips || '',
+        ai_reasoning: data.recommendation?.ai_reasoning || '',
+        styling_tips: data.recommendation?.styling_tips || '',
       };
 
       // Update state

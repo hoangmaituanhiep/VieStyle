@@ -50,6 +50,17 @@ const VIETNAMESE_EVENT_PRESETS = [
   },
 ];
 
+const normalizeOutfitArray = (value: any): string[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === '{}') return [];
+    return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+};
+
 export const EventFormView: React.FC<EventFormViewProps> = ({
   user,
   outfits = [],
@@ -285,46 +296,67 @@ export const EventFormView: React.FC<EventFormViewProps> = ({
 
       {/* Overlay Toàn Màn Hình Hiển Thị Trang Phục Được Chọn (Chuẩn VieStyle Minimalist) */}
       {suggestedOutfit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
-          {/* Nút Đóng (biểu tượng X mỏng, tinh tế ở góc trên bên phải Overlay) */}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          {/* Nút Đóng đặt ở góc phải trên cùng gọn gàng */}
           <button
             type="button"
             onClick={() => setSuggestedOutfit(null)}
-            className="absolute top-6 right-6 p-2.5 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-all z-10 focus:outline-none"
+            className="absolute top-5 right-5 sm:top-7 sm:right-7 p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors z-20 focus:outline-none"
             aria-label="Đóng"
           >
-            <X className="w-6 h-6 stroke-[1.25]" />
+            <X className="w-6 h-6 stroke-[1.5]" />
           </button>
 
-          {/* Visual Card của trang phục vào chính giữa màn hình */}
-          <div className="w-full max-w-sm sm:max-w-md bg-[#FAF7F2] border border-[#E3D9C8] rounded-xs shadow-2xl overflow-hidden flex flex-col items-center">
-            {/* Ảnh to, sắc nét, object-cover */}
-            <div className="relative w-full aspect-[3/4] overflow-hidden bg-[#EAE3D6]">
-              <img
-                src={suggestedOutfit.image_url}
-                alt={suggestedOutfit.name}
-                className="w-full h-full object-cover object-center transition-transform duration-700 hover:scale-105"
-              />
+          {/* Visual Card giống hệt như khi xem trong Kho trang phục */}
+          <div className="w-full max-w-xs sm:max-w-sm bg-[#FFFFFF] border border-[#EBE4D8] rounded-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            {/* Hình ảnh to, sắc nét, bọc viền tinh tế */}
+            <div className="relative aspect-[3/4] w-full overflow-hidden bg-[#EAE3D6]">
+              {suggestedOutfit.image_url ? (
+                <img
+                  src={suggestedOutfit.image_url}
+                  alt={suggestedOutfit.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover object-center"
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center font-mono text-xs text-[#78716A] bg-[#EDE6DB]">
+                  Trang Phục Được Chọn
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
+
+              <div className="absolute top-3 left-3 flex flex-wrap gap-1">
+                {normalizeOutfitArray(suggestedOutfit.event_types).slice(0, 2).map((et) => (
+                  <span
+                    key={et}
+                    className="text-[9px] font-medium uppercase tracking-widest px-2 py-0.5 rounded-sm bg-[#FAF7F2]/90 text-[#141210] border border-[#EBE4D8]"
+                  >
+                    {et}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            {/* Minimalist: Chữ chỉ chiếm 10%, không gian mở rộng rãi */}
-            <div className="w-full p-6 text-center space-y-2">
-              <span className="text-[10px] font-mono tracking-[0.25em] uppercase text-[#8B1E1E] font-semibold block">
-                TRANG PHỤC ĐƯỢC CHỌN
-              </span>
-              <h2 className="font-serif text-2xl font-medium text-[#141210] tracking-tight">
+            {/* Ràng buộc Minimalist: Chữ chỉ chiếm 10% (Tên, mô tả ngắn gọn) */}
+            <div className="p-4 space-y-1.5 bg-[#FFFFFF]">
+              <h3 className="font-serif font-medium text-[#141210] text-base sm:text-lg leading-snug line-clamp-1">
                 {suggestedOutfit.name}
-              </h2>
+              </h3>
               {suggestedOutfit.description && (
-                <p className="text-xs text-[#59534B] font-sans line-clamp-1 max-w-xs mx-auto">
+                <p className="text-xs text-[#59534B] font-sans line-clamp-1">
                   {suggestedOutfit.description}
                 </p>
               )}
-              {suggestedOutfit.style_tags && (
-                <p className="text-[10px] font-mono text-[#78716A] uppercase tracking-wider pt-1">
-                  {suggestedOutfit.style_tags}
-                </p>
-              )}
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {normalizeOutfitArray(suggestedOutfit.style_tags).slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[9px] px-1.5 py-0.5 rounded-sm bg-[#FAF7F2] text-[#78716A] border border-[#EBE4D8]"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </div>

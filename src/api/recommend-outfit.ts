@@ -93,6 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           return res.status(200).json({
             success: true,
             cached: true,
+            outfit_id: matchedOutfit.id,
             recommendation: {
               selected_outfit_id: matchedOutfit.id,
               match_score: 96,
@@ -121,19 +122,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const pastRatingsText = (past_ratings || []).map((r: any) => {
-      const outfitName = r.outfit_name || r.outfit?.name || 'Outfit';
-      const eventType = r.event_type || 'event';
-      const rating = r.rating || 3;
-      return `- Đánh giá trước: "${outfitName}" được ${rating}/5 sao cho dịp ${eventType}.`;
-    }).join('\n') || 'Chưa có lịch sử đánh giá.';
-
-    const mixHistoryText = (mix_history || []).slice(0, 6).map((m: any) => {
-      const garment = m.garment_type || 'Trang phục';
-      const colors = [m.primary_color, m.secondary_color].filter(Boolean).join(' & ');
-      return `- Thử nghiệm phối đồ: "${garment}" | Tông màu: ${colors}`;
-    }).join('\n') || 'Chưa có thử nghiệm Mix & Match trước đó.';
-
     const safeArray = (v: any) => {
       if (Array.isArray(v)) return v;
       if (typeof v === 'string') {
@@ -144,38 +132,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return [];
     };
 
-    const catalogSummary = available_outfits.map((o: any) => ({
+    // Mảng rút gọn của các trang phục hiện có (chỉ gửi id, name, event_types, style_tags để tiết kiệm Context Window)
+    const compactCatalog = available_outfits.map((o: any) => ({
       id: o.id,
       name: o.name,
-      description: o.description,
       event_types: safeArray(o.event_types),
       style_tags: safeArray(o.style_tags),
-      colors: safeArray(o.colors),
     }));
 
-    const systemInstruction = `You are VieStyle's Chief AI Stylist and Vietnamese Traditional Outfit Club Director.
-Your task is to select the single optimal outfit from the provided catalog.`;
+    // Câu lệnh prompt yêu cầu AI theo chuẩn tối ưu cực hạn
+    const userPrompt = `Bạn là hệ thống match trang phục. Dựa vào yêu cầu của người dùng, hãy chọn ra 1 trang phục phù hợp nhất từ danh sách. BẮT BUỘC chỉ trả về 1 chuỗi JSON duy nhất, không có văn bản giải thích, không bọc markdown (\`\`\`json). Cấu trúc: {"outfit_id": "chuỗi_uuid_được_chọn"}.
 
-    const userPrompt = `
-=== CLIENT STYLE PROFILE ===
-Name: ${user_profile?.name || 'Client'}
-Age: ${user_profile?.age || '??'}
-Favorite Color: ${user_profile?.favourite_color || 'Light Yellow'}
+Yêu cầu người dùng:
+- Sự kiện: ${inputEventName || ''} (${inputEventType || ''})
+- Địa điểm: ${inputEventPlace || ''}
+${event_context.dress_code ? `- Dress code: ${event_context.dress_code}` : ''}
+${user_profile?.favourite_color ? `- Màu ưa thích: ${user_profile.favourite_color}` : ''}
+${user_profile?.personalities?.length ? `- Phong cách: ${user_profile.personalities.join(', ')}` : ''}
 
-=== UPCOMING EVENT CONTEXT ===
-Event Name: ${event_context.event_name}
-Place / Venue: ${event_context.event_place}
-Event Type: ${event_context.event_type}
-
-=== USER'S HISTORICAL RATINGS ===
-${pastRatingsText}
-
-=== USER'S MIX & MATCH EXPERIMENTS ===
-${mixHistoryText}
-
-=== AVAILABLE WARDROBE INVENTORY ===
-${JSON.stringify(catalogSummary, null, 2)}
-`;
+Danh sách trang phục:
+${JSON.stringify(compactCatalog)}`;
 
     // Gọi bản gemini-3.8-flash
     let response;
@@ -184,24 +160,8 @@ ${JSON.stringify(catalogSummary, null, 2)}
         model: 'gemini-3.8-flash',
         contents: userPrompt,
         config: {
-          systemInstruction,
-          temperature: 0.65,
+          temperature: 0.2,
           responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              selected_outfit_id: { type: Type.STRING },
-              match_score: { type: Type.INTEGER },
-              ai_reasoning: { type: Type.STRING },
-              styling_tips: { type: Type.STRING },
-              alternative_outfit_id: { type: Type.STRING },
-              vibe_keywords: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-              },
-            },
-            required: ['selected_outfit_id', 'match_score', 'ai_reasoning', 'styling_tips'],
-          },
         },
       });
     } catch (genaiErr: any) {
@@ -211,10 +171,27 @@ ${JSON.stringify(catalogSummary, null, 2)}
       });
     }
 
-    const parsed = JSON.parse(response.text || '{}');
-    const exists = available_outfits.some((o: any) => o.id === parsed.selected_outfit_id);
+    let parsed: any = {};
+    try {
+      let rawText = (response.text || '').trim();
+      if (rawText.startsWith('```json')) {
+        rawText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+      } else if (rawText.startsWith('```')) {
+        rawText = rawText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      parsed = JSON.parse(rawText || '{}');
+    } catch (parseErr) {
+      console.warn('Failed to parse JSON response from Gemini:', response.text);
+      const idMatch = response.text?.match(/"outfit_id"\s*:\s*"([^"]+)"/);
+      if (idMatch && idMatch[1]) {
+        parsed = { outfit_id: idMatch[1] };
+      }
+    }
+
+    let selectedOutfitId = parsed?.outfit_id || parsed?.selected_outfit_id;
+    const exists = available_outfits.some((o: any) => o.id === selectedOutfitId);
     if (!exists) {
-      parsed.selected_outfit_id = available_outfits[0].id;
+      selectedOutfitId = available_outfits[0].id;
     }
 
     // Lưu kết quả này vào bảng suggestions_history để làm Caching cho những user/lần sau
@@ -224,14 +201,14 @@ ${JSON.stringify(catalogSummary, null, 2)}
         // RÀNG BUỘC INSERT: CHỈ DÙNG các cột: user_id, outfit_id, event_name, event_place, event_type
         const cachePayload = {
           user_id: cacheUserId,
-          outfit_id: parsed.selected_outfit_id,
+          outfit_id: selectedOutfitId,
           event_name: inputEventName || 'Sự kiện',
           event_place: inputEventPlace || 'Địa điểm',
           event_type: inputEventType,
         };
 
         await supabase.from('suggestions_history').insert([cachePayload]);
-        console.log(`[Cache Miss -> Stored] Đã lưu caching outfit_id vào suggestions_history cho dịp: ${inputEventType}`);
+        console.log(`[Cache Miss -> Stored] Đã lưu caching outfit_id (${selectedOutfitId}) vào suggestions_history cho dịp: ${inputEventType}`);
       } catch (insertErr: any) {
         console.warn('Lỗi ghi suggestions_history cache:', insertErr?.message);
       }
@@ -240,7 +217,10 @@ ${JSON.stringify(catalogSummary, null, 2)}
     return res.status(200).json({
       success: true,
       cached: false,
-      recommendation: parsed,
+      outfit_id: selectedOutfitId,
+      recommendation: {
+        selected_outfit_id: selectedOutfitId,
+      },
       engine: 'gemini-3.8-flash',
     });
   } catch (error: any) {
