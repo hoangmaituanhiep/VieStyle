@@ -4,6 +4,12 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import {
+  buildMasterOutfitPrompt,
+  buildGeminiPromptInstruction,
+  buildGeminiMultimodalPrompt,
+  buildPollinationsUrl,
+} from './src/lib/outfit-prompt-builder';
 
 dotenv.config();
 
@@ -11,7 +17,7 @@ dotenv.config();
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -298,81 +304,126 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Gemini 1.5 Flash Prompt Generator + Pollinations.ai)
+// API Route: AI Mix & Match Image Generation (Master Prompt Generator + Gemini Expansion + Pollinations Flux)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
       garment_type,
+      garment_image_url,
+      garment_description,
+      garment_tags,
+      garment_colors,
       accessories,
       primary_color,
       secondary_color,
       background_vibe,
+      pose_framing,
+      lighting_mood,
       style_notes,
+      seed: reqSeed,
     } = req.body || {};
 
     if (!garment_type || !primary_color) {
       return res.status(400).json({ error: 'Thiếu thông tin bắt buộc: garment_type hoặc primary_color.' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error('Lỗi server: Chưa cấu hình GEMINI_API_KEY.');
-      return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ.',
-      });
-    }
+    // 1. Sinh master prompt chuẩn mực với cấu trúc chi tiết cổ phục/trang phục, phụ kiện và màu sắc
+    const { promptText: masterPrompt, seed } = buildMasterOutfitPrompt({
+      garment_type,
+      garment_image_url,
+      garment_description,
+      garment_tags,
+      garment_colors,
+      accessories,
+      primary_color,
+      secondary_color,
+      background_vibe,
+      pose_framing,
+      lighting_mood,
+      style_notes,
+      seed: typeof reqSeed === 'number' ? reqSeed : undefined,
+    });
 
-    const accessoriesText = Array.isArray(accessories) && accessories.length > 0
-      ? accessories.join(', ')
-      : 'minimalist fine silver traditional Vietnamese ornaments';
+    let promptText = masterPrompt;
 
-    const colorScheme = secondary_color
-      ? `${primary_color} harmonized with accents of ${secondary_color}`
-      : primary_color;
-
-    const settingText = background_vibe || 'minimalist ancient Vietnamese heritage courtyard architecture';
-
-    const userPrompt = `Dựa trên các tuỳ chọn phối đồ này, hãy viết một câu miêu tả hình ảnh bằng TIẾNG ANH (Image Prompt) thật chi tiết, mang phong cách thời trang cao cấp (high-fashion editorial), rõ ràng về màu sắc và chất liệu truyền thống Việt Nam. CHỈ trả về câu prompt, không giải thích.
-
-Thông tin phối đồ:
-- Trang phục: ${garment_type}
-- Màu sắc chủ đạo: ${primary_color}
-- Màu sắc điểm xuyết: ${secondary_color || 'Không'}
-- Phụ kiện truyền thống: ${accessoriesText}
-- Bối cảnh: ${settingText}
-${style_notes ? `- Ghi chú phong cách: ${style_notes}` : ''}`.trim();
-
-    // Sinh prompt chi tiết bằng gemini-3.8-flash
-    let promptText = '';
-    try {
-      const ai = getGeminiClient();
-      if (ai) {
-        const geminiRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: userPrompt,
-        });
-        promptText = (geminiRes.text || '').trim();
+    // 2. Tải và chuẩn bị ảnh mẫu (Sample Image) nếu được cung cấp để Gemini Vision phân tích
+    let sampleImagePart: any = null;
+    if (garment_image_url && typeof garment_image_url === 'string' && garment_image_url.startsWith('http')) {
+      try {
+        const imgFetch = await fetch(garment_image_url, { signal: AbortSignal.timeout(6000) });
+        if (imgFetch.ok) {
+          const arrBuf = await imgFetch.arrayBuffer();
+          const mime = (imgFetch.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+          sampleImagePart = {
+            inlineData: {
+              data: Buffer.from(arrBuf).toString('base64'),
+              mimeType: mime,
+            },
+          };
+        }
+      } catch (imgErr: any) {
+        console.warn('Could not fetch sample image for Gemini Vision analysis:', imgErr?.message);
       }
-    } catch (genErr: any) {
-      console.warn('Gemini client attempt error, trying standard fallback prompt...', genErr?.message);
     }
 
-    // Nếu Gemini không trả về prompt, sử dụng prompt dự phòng chuẩn xác
-    if (!promptText) {
-      promptText = `A high-fashion magazine editorial photograph of an elegant Vietnamese model in authentic ${garment_type}, crafted in raw silk and brocade in ${colorScheme}, styled with ${accessoriesText}, set against ${settingText}, cinematic lighting, 8k resolution, minimalist Vogue editorial aesthetics`;
+    // 3. Nếu có GEMINI_API_KEY, phân tích trực tiếp ảnh mẫu qua Gemini Multimodal Vision
+    const ai = getGeminiClient();
+    if (ai) {
+      const details = {
+        garment_type,
+        garment_image_url,
+        garment_description,
+        garment_tags,
+        garment_colors,
+        accessories,
+        primary_color,
+        secondary_color,
+        background_vibe,
+        pose_framing,
+        lighting_mood,
+        style_notes,
+      };
+
+      const geminiInstruction = sampleImagePart
+        ? buildGeminiMultimodalPrompt(details, masterPrompt)
+        : buildGeminiPromptInstruction(details, masterPrompt);
+
+      const geminiContents: any[] = sampleImagePart
+        ? [sampleImagePart, geminiInstruction]
+        : [geminiInstruction];
+
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+      for (const modelName of candidateModels) {
+        try {
+          const geminiRes = await ai.models.generateContent({
+            model: modelName,
+            contents: geminiContents,
+          });
+          const candidateText = (geminiRes.text || '').trim();
+          if (candidateText && candidateText.length > 50) {
+            // Loại bỏ bọc markdown hoặc quote nếu có
+            promptText = candidateText
+              .replace(/^```[a-z]*\s*/i, '')
+              .replace(/\s*```$/i, '')
+              .replace(/^["'`]+|["'`]+$/g, '')
+              .trim();
+            break;
+          }
+        } catch (genErr: any) {
+          console.warn(`Gemini attempt (${modelName}) failed:`, genErr?.message);
+        }
+      }
     }
 
-    // Mã hoá prompt bằng encodeURIComponent()
-    const encodedPrompt = encodeURIComponent(promptText);
-
-    // Tạo URL ảnh tĩnh qua Pollinations.ai
-    const finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=1000&nologo=true`;
+    // 3. Tạo URL ảnh độ nét cao qua Pollinations với model Flux và seed ngẫu nhiên
+    const finalImageUrl = buildPollinationsUrl(promptText, seed);
 
     return res.json({
       success: true,
       imageUrl: finalImageUrl,
       image_url: finalImageUrl,
       prompt_used: promptText,
+      seed,
     });
   } catch (error: any) {
     console.error('Outfit image generation server error:', error);
@@ -499,8 +550,31 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`AuraStyle Server running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`VieStyle Server running on http://localhost:${PORT}`);
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('outfits').select('id, name, image_url, description').then(({ data, error }) => {
+        console.log(`--- CURRENT DB OUTFITS (COUNT: ${data?.length || 0}) ---`);
+        if (data) {
+          data.forEach((o) => console.log(`ID: ${o.id} | NAME: ${o.name} | IMG: ${o.image_url}`));
+        }
+        if (error) console.error('Supabase error:', error.message);
+      });
+    }
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ Cổng ${PORT} đang bị chiếm dụng bởi một tiến trình Node/server khác.`);
+      console.error(`👉 Cách xử lý:`);
+      console.error(`   1. Tắt tiến trình đang chiếm port ${PORT} bằng lệnh PowerShell:`);
+      console.error(`      Stop-Process -Id (Get-NetTCPConnection -LocalPort ${PORT}).OwningProcess -Force`);
+      console.error(`   2. Hoặc đổi sang port khác: set PORT=3001 && npm run dev (hoặc ghi PORT=3001 vào file .env)\n`);
+      process.exit(1);
+    } else {
+      console.error('Server error:', err);
+    }
   });
 }
 

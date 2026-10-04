@@ -1,20 +1,33 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  buildMasterOutfitPrompt,
+  buildGeminiPromptInstruction,
+  buildGeminiMultimodalPrompt,
+  buildPollinationsUrl,
+} from '../../../lib/outfit-prompt-builder';
 
 /**
  * Next.js App Router API Route: /api/generate-outfit-image
- * Combination of Gemini 1.5 Flash (for prompt generation) + Pollinations.ai (for image rendering)
+ * Combination of Sample Image Multimodal Vision Analysis + Master Vietnamese Costume Anatomy + Gemini Expansion + Pollinations Flux
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
       garment_type,
+      garment_image_url,
+      garment_description,
+      garment_tags,
+      garment_colors,
       accessories,
       primary_color,
       secondary_color,
       background_vibe,
+      pose_framing,
+      lighting_mood,
       style_notes,
+      seed: reqSeed,
     } = body || {};
 
     if (!garment_type || !primary_color) {
@@ -24,62 +37,105 @@ export async function POST(request: Request) {
       );
     }
 
+    // 1. Sinh master prompt chuẩn mực với cấu trúc chi tiết cổ phục/trang phục, phụ kiện và màu sắc
+    const { promptText: masterPrompt, seed } = buildMasterOutfitPrompt({
+      garment_type,
+      garment_image_url,
+      garment_description,
+      garment_tags,
+      garment_colors,
+      accessories,
+      primary_color,
+      secondary_color,
+      background_vibe,
+      pose_framing,
+      lighting_mood,
+      style_notes,
+      seed: typeof reqSeed === 'number' ? reqSeed : undefined,
+    });
+
+    let promptText = masterPrompt;
+
+    // 2. Tải và chuẩn bị ảnh mẫu (Sample Image) nếu được cung cấp để Gemini Vision phân tích
+    let sampleImagePart: any = null;
+    if (garment_image_url && typeof garment_image_url === 'string' && garment_image_url.startsWith('http')) {
+      try {
+        const imgFetch = await fetch(garment_image_url, { signal: AbortSignal.timeout(6000) });
+        if (imgFetch.ok) {
+          const arrBuf = await imgFetch.arrayBuffer();
+          const mime = (imgFetch.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+          sampleImagePart = {
+            inlineData: {
+              data: Buffer.from(arrBuf).toString('base64'),
+              mimeType: mime,
+            },
+          };
+        }
+      } catch (imgErr: any) {
+        console.warn('Could not fetch sample image for Gemini Vision analysis:', imgErr?.message);
+      }
+    }
+
+    // 3. Phân tích trực tiếp ảnh mẫu qua Gemini Multimodal Vision nếu có API key
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ.' },
-        { status: 500 }
-      );
+    if (apiKey) {
+      try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const details = {
+          garment_type,
+          garment_image_url,
+          garment_description,
+          garment_tags,
+          garment_colors,
+          accessories,
+          primary_color,
+          secondary_color,
+          background_vibe,
+          pose_framing,
+          lighting_mood,
+          style_notes,
+        };
+
+        const geminiInstruction = sampleImagePart
+          ? buildGeminiMultimodalPrompt(details, masterPrompt)
+          : buildGeminiPromptInstruction(details, masterPrompt);
+
+        const geminiContents: any[] = sampleImagePart
+          ? [sampleImagePart, geminiInstruction]
+          : [geminiInstruction];
+
+        const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+        for (const modelName of candidateModels) {
+          try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(geminiContents);
+            const candidateText = result.response.text().trim();
+            if (candidateText && candidateText.length > 50) {
+              promptText = candidateText
+                .replace(/^```[a-z]*\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .replace(/^["'`]+|["'`]+$/g, '')
+                .trim();
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`Gemini (${modelName}) failed:`, modelErr?.message);
+          }
+        }
+      } catch (err: any) {
+        console.warn('Gemini client attempt error:', err?.message);
+      }
     }
 
-    const accessoriesText =
-      Array.isArray(accessories) && accessories.length > 0
-        ? accessories.join(', ')
-        : 'minimalist fine silver traditional Vietnamese ornaments';
-
-    const colorScheme = secondary_color
-      ? `${primary_color} harmonized with accents of ${secondary_color}`
-      : primary_color;
-
-    const settingText =
-      background_vibe || 'minimalist ancient Vietnamese heritage courtyard architecture';
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    // Sử dụng model gemini-3.8-flash để sinh prompt
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
-
-    const userPrompt = `Dựa trên các tuỳ chọn phối đồ này, hãy viết một câu miêu tả hình ảnh bằng TIẾNG ANH (Image Prompt) thật chi tiết, mang phong cách thời trang cao cấp (high-fashion editorial), rõ ràng về màu sắc và chất liệu truyền thống Việt Nam. CHỈ trả về câu prompt, không giải thích.
-
-Thông tin phối đồ:
-- Trang phục: ${garment_type}
-- Màu sắc chủ đạo: ${primary_color}
-- Màu sắc điểm xuyết: ${secondary_color || 'Không'}
-- Phụ kiện truyền thống: ${accessoriesText}
-- Bối cảnh: ${settingText}
-${style_notes ? `- Ghi chú phong cách: ${style_notes}` : ''}`.trim();
-
-    let promptText = '';
-    try {
-      const result = await model.generateContent(userPrompt);
-      promptText = result.response.text().trim();
-    } catch (err: any) {
-      console.warn('Gemini 3.8 flash prompt generation error, using fallback prompt:', err?.message);
-    }
-
-    if (!promptText) {
-      promptText = `A high-fashion magazine editorial photograph of an elegant Vietnamese model in authentic ${garment_type}, crafted in raw silk and brocade in ${colorScheme}, styled with ${accessoriesText}, set against ${settingText}, cinematic lighting, 8k resolution, minimalist Vogue editorial aesthetics`;
-    }
-
-    // Mã hoá bằng encodeURIComponent()
-    const encodedPrompt = encodeURIComponent(promptText);
-
-    // Tạo URL ảnh tĩnh
-    const finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=1000&nologo=true`;
+    // 4. Tạo URL ảnh tĩnh độ nét cao với Pollinations Flux và seed ngẫu nhiên
+    const finalImageUrl = buildPollinationsUrl(promptText, seed);
 
     return NextResponse.json({
+      success: true,
       imageUrl: finalImageUrl,
       image_url: finalImageUrl,
       prompt_used: promptText,
+      seed,
     });
   } catch (error: any) {
     console.error('Error generating outfit image:', error?.message);
