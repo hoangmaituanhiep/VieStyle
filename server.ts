@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import axios from 'axios';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
@@ -343,7 +344,7 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Pollinations Flux Pro Static URL)
+// API Route: AI Mix & Match Image Generation (Self-Hosted Stable Diffusion XL via Google Colab & Ngrok)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
@@ -373,12 +374,24 @@ app.post('/api/generate-outfit-image', async (req, res) => {
     // Master Prompt Template góc rộng lấy cảnh sắc nét (35mm f/8)
     const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a gorgeous Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features premium flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''}.`;
 
-    // 2. Tạo URL Pollinations Flux Pro
-    const encodedPrompt = encodeURIComponent(promptText);
-    const finalImageUrl =
-      'https://image.pollinations.ai/prompt/' +
-      encodedPrompt +
-      '?width=800&height=1000&nologo=true&model=flux-pro';
+    // 2. Gọi Server Colab Ngrok bằng axios (không cần Authorization)
+    const response = await axios.post(
+      'https://correct-posh-juice.ngrok-free.dev/api/generate',
+      { inputs: promptText },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        responseType: 'arraybuffer',
+        timeout: 180000,
+      }
+    );
+
+    // 3. Đọc dữ liệu nhị phân (Buffer) và chuyển sang Base64
+    const mimeType = (response.headers['content-type'] as string) || 'image/jpeg';
+    const base64Image = Buffer.from(response.data).toString('base64');
+    const finalImageUrl = `data:${mimeType};base64,${base64Image}`;
 
     return res.json({
       imageUrl: finalImageUrl,
@@ -386,9 +399,17 @@ app.post('/api/generate-outfit-image', async (req, res) => {
       prompt_used: promptText,
     });
   } catch (error: any) {
-    console.error('Outfit image generation server error:', error);
-    return res.status(500).json({
-      error: error?.message || 'Lỗi máy chủ',
+    console.error('Outfit image generation server error:', error?.message);
+    let errorMessage = error?.message || 'Lỗi máy chủ tạo ảnh SDXL';
+    if (error?.response?.data) {
+      try {
+        errorMessage = Buffer.from(error.response.data).toString('utf-8');
+      } catch {
+        // fallback
+      }
+    }
+    return res.status(error?.response?.status || 500).json({
+      error: errorMessage,
     });
   }
 });
