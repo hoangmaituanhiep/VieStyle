@@ -115,8 +115,10 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
   const [selectedAccentColor, setSelectedAccentColor] = useState(ACCENT_COLORS[0]);
   const [selectedBackdrop, setSelectedBackdrop] = useState(BACKDROP_OPTIONS[0]);
 
-  // Generation state
+  // Generation state - Immediate preview & optimistic history
   const [isGenerating, setIsGenerating] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [historyList, setHistoryList] = useState<MixMatchItem[]>(mixHistory || []);
   const [generatedResult, setGeneratedResult] = useState<{
     imageUrl: string;
     promptUsed: string;
@@ -124,6 +126,13 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
     isSaved: boolean;
   } | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+
+  // Sync historyList whenever mixHistory prop updates
+  useEffect(() => {
+    if (mixHistory) {
+      setHistoryList(mixHistory);
+    }
+  }, [mixHistory]);
 
   // Toggle accessory
   const handleToggleAccessory = (acc: string) => {
@@ -167,20 +176,36 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
         throw new Error(data.error || 'Không nhận được dữ liệu hình ảnh.');
       }
 
+      // 1. CẬP NHẬT STATE TỨC THÌ (Immediate State Update)
       setGenerationError(null);
+      setPreviewImage(imageUrl);
 
       const newResult = {
         imageUrl: imageUrl,
         promptUsed: data.prompt_used || '',
-        model: 'gemini-flash-pollinations',
+        model: 'flux-pro',
         isSaved: false,
       };
-
       setGeneratedResult(newResult);
 
-      // Auto-save to personal mix history if user is logged in
+      // 2. CẬP NHẬT DANH SÁCH LỊCH SỬ TỨC THÌ (Optimistic UI)
+      const optimisticItem: MixMatchItem = {
+        id: 'local-' + Date.now(),
+        user_id: user?.id || 'guest',
+        garment_type: selectedGarmentName,
+        accessories: selectedAccessories,
+        primary_color: selectedPrimaryColor.name,
+        secondary_color: selectedAccentColor.name,
+        background_vibe: selectedBackdrop.name,
+        prompt_used: data.prompt_used || '',
+        image_url: imageUrl,
+        created_at: new Date().toISOString(),
+      };
+      setHistoryList((prev) => [optimisticItem, ...prev]);
+
+      // 3. Auto-save to personal mix history if user is logged in (xử lý ngầm, không reset ảnh nếu lỗi)
       if (user && saveCallback) {
-        await saveCallback({
+        saveCallback({
           user_id: user.id,
           garment_type: selectedGarmentName,
           accessories: selectedAccessories,
@@ -188,14 +213,18 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
           secondary_color: selectedAccentColor.name,
           background_vibe: selectedBackdrop.name,
           prompt_used: data.prompt_used || '',
-          image_url: data.image_url,
-        });
-        setGeneratedResult({ ...newResult, isSaved: true });
+          image_url: imageUrl,
+        })
+          .then(() => {
+            setGeneratedResult((prev) => (prev ? { ...prev, isSaved: true } : null));
+          })
+          .catch((saveErr: any) => {
+            console.warn('Lỗi lưu lịch sử cơ sở dữ liệu ngầm:', saveErr?.message);
+          });
       }
     } catch (err: any) {
       console.warn('Image generation error:', err?.message);
       setGenerationError(err?.message || 'Không thể tạo hình ảnh.');
-      setGeneratedResult(null);
     } finally {
       setIsGenerating(false);
     }
@@ -203,23 +232,33 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
 
   // Explicit Save action
   const handleSaveToHistory = async () => {
-    if (!generatedResult) return;
+    const activeUrl = previewImage || generatedResult?.imageUrl;
+    if (!activeUrl) return;
     if (!user) {
       onOpenAuth();
       return;
     }
     if (saveCallback) {
-      await saveCallback({
-        user_id: user.id,
-        garment_type: selectedGarmentName,
-        accessories: selectedAccessories,
-        primary_color: selectedPrimaryColor.name,
-        secondary_color: selectedAccentColor.name,
-        background_vibe: selectedBackdrop.name,
-        prompt_used: generatedResult.promptUsed,
-        image_url: generatedResult.imageUrl,
-      });
-      setGeneratedResult({ ...generatedResult, isSaved: true });
+      try {
+        await saveCallback({
+          user_id: user.id,
+          garment_type: selectedGarmentName,
+          accessories: selectedAccessories,
+          primary_color: selectedPrimaryColor.name,
+          secondary_color: selectedAccentColor.name,
+          background_vibe: selectedBackdrop.name,
+          prompt_used: generatedResult?.promptUsed || '',
+          image_url: activeUrl,
+        });
+        setGeneratedResult((prev) => (prev ? { ...prev, isSaved: true } : {
+          imageUrl: activeUrl,
+          promptUsed: '',
+          model: 'flux-pro',
+          isSaved: true,
+        }));
+      } catch (err: any) {
+        console.warn('Lỗi lưu bản phối:', err?.message);
+      }
     }
   };
 
@@ -238,7 +277,7 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-[#78716A] font-mono">
-            {mixHistory.length} Bản Phối Lưu
+            {historyList.length} Bản Phối Lưu
           </span>
         </div>
       </div>
@@ -501,10 +540,16 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
             {/* Visual Box with square aspect ratio */}
             <div className="relative aspect-square w-full overflow-hidden rounded-xs bg-[#FAF7F2] border border-[#E3D9C8] flex items-center justify-center">
               {isGenerating ? (
-                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
-                  <p className="font-serif text-xs text-[#78716A] tracking-wider animate-pulse">
-                    Đang phác thảo phối đồ AI...
-                  </p>
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#FAF7F2]">
+                  <div className="w-8 h-8 border-2 border-[#8B1E1E] border-t-transparent rounded-full animate-spin"></div>
+                  <div className="space-y-1">
+                    <p className="font-serif text-xs text-[#78716A] tracking-wider animate-pulse font-medium">
+                      Đang phác thảo phối đồ AI...
+                    </p>
+                    <p className="text-[10px] font-mono text-[#A8A29E]">
+                      Kết xuất siêu thực Flux Pro
+                    </p>
+                  </div>
                 </div>
               ) : generationError ? (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-[#FAF7F2]">
@@ -512,11 +557,12 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
                     {generationError}
                   </p>
                 </div>
-              ) : generatedResult ? (
+              ) : (previewImage || generatedResult?.imageUrl) ? (
                 <img
-                  src={generatedResult.imageUrl}
+                  key={previewImage || generatedResult?.imageUrl}
+                  src={previewImage || generatedResult?.imageUrl}
                   alt={selectedGarmentName}
-                  className="w-full h-full object-cover object-center"
+                  className="w-full h-full object-cover object-center animate-fadeIn"
                 />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#FAF7F2]">
@@ -559,19 +605,19 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
             </div>
 
             {/* Actions for generated result */}
-            {generatedResult && (
+            {(previewImage || generatedResult) && (
               <div className="pt-3 border-t border-[#EBE4D8] flex items-center gap-2">
                 <button
                   onClick={handleSaveToHistory}
-                  disabled={generatedResult.isSaved}
+                  disabled={generatedResult?.isSaved}
                   className={`flex-1 py-2.5 px-3 rounded-sm border text-xs font-medium uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
-                    generatedResult.isSaved
+                    generatedResult?.isSaved
                       ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                       : 'border-[#8B1E1E] bg-[#FFFFFF] text-[#8B1E1E] hover:bg-[#8B1E1E] hover:text-[#FAF7F2]'
                   }`}
                 >
                   <BookmarkPlus className="w-3.5 h-3.5" />
-                  <span>{generatedResult.isSaved ? 'Đã Lưu Vào Hồ Sơ' : 'Lưu Vào Hồ Sơ'}</span>
+                  <span>{generatedResult?.isSaved ? 'Đã Lưu Vào Hồ Sơ' : 'Lưu Vào Hồ Sơ'}</span>
                 </button>
 
                 <button
@@ -591,14 +637,14 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
       <section className="space-y-6 pt-10 border-t border-[#EBE4D8]">
         <div className="flex items-baseline justify-between border-b border-[#EBE4D8] pb-3">
           <h2 className="text-xl sm:text-2xl font-serif text-[#141210] font-medium">
-            Lịch Sử Thử Nghiệm Mix & Match ({mixHistory.length})
+            Lịch Sử Thử Nghiệm Mix & Match ({historyList.length})
           </h2>
           <span className="text-xs font-mono text-[#78716A]">
             Dữ liệu cá nhân hóa cho AI Stylist
           </span>
         </div>
 
-        {mixHistory.length === 0 ? (
+        {historyList.length === 0 ? (
           <div className="p-12 text-center border border-dashed border-[#DCD3C4] rounded-sm bg-[#FAF7F2] space-y-3">
             <Sparkles className="w-6 h-6 text-[#C5A059] mx-auto" />
             <p className="text-xs text-[#78716A] font-mono">
@@ -607,7 +653,7 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
-            {mixHistory.map((item) => (
+            {historyList.map((item) => (
               <div
                 key={item.id}
                 className="group bg-[#FFFFFF] border border-[#EBE4D8] hover:border-[#8B1E1E] rounded-sm overflow-hidden transition-all duration-300 flex flex-col justify-between shadow-2xs"

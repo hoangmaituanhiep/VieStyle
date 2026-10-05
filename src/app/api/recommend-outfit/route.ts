@@ -55,32 +55,19 @@ export async function POST(request: Request) {
       try {
         let cachedRow: any = null;
 
-        // Thử tìm khớp chính xác event_type và event_place
-        if (inputEventPlace) {
+        // Thử tìm khớp chính xác event_name, event_type và event_place
+        if (inputEventPlace && inputEventName) {
           const { data: exactMatch } = await supabase
             .from('suggestions_history')
             .select('*')
             .eq('event_type', inputEventType)
             .eq('event_place', inputEventPlace)
+            .eq('event_name', inputEventName)
             .order('created_at', { ascending: false })
             .limit(1);
 
           if (exactMatch && exactMatch.length > 0 && exactMatch[0]?.outfit_id) {
             cachedRow = exactMatch[0];
-          }
-        }
-
-        // Nếu chưa có, tìm gợi ý gần nhất theo event_type
-        if (!cachedRow) {
-          const { data: typeMatch } = await supabase
-            .from('suggestions_history')
-            .select('*')
-            .eq('event_type', inputEventType)
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          if (typeMatch && typeMatch.length > 0 && typeMatch[0]?.outfit_id) {
-            cachedRow = typeMatch[0];
           }
         }
 
@@ -156,36 +143,37 @@ export async function POST(request: Request) {
       colors: safeArray(o.colors),
     }));
 
-    const systemInstruction = `You are VieStyle's Chief AI Stylist and Vietnamese Traditional Outfit Club Director.
-Your task is to select the single optimal outfit from the provided catalog that best complements the user's personal aesthetic, age, hobbies, favorite color, and especially the specific event context (venue, formality, and event type).
+    const systemInstruction = `Bạn là một chuyên gia hàng đầu về Cổ phục và Trang phục truyền thống Việt Nam.
 
-Crucial Instructions:
-1. Pay deep attention to BOTH the user's PAST RATINGS and their recent MIX & MATCH STUDIO EXPERIMENTS.
-2. The selected_outfit_id MUST be an exact 'id' from the provided inventory list. Do not make up non-existent IDs.
-3. Provide an elevated, articulate, high-fashion explanation for the choice, and concrete styling tips.`;
+TUYỆT ĐỐI KHÔNG được lạm dụng Áo Dài. Bạn PHẢI xem xét và ưu tiên gợi ý các loại trang phục đa dạng khác dựa trên tiêu chí của người dùng, bao gồm nhưng không giới hạn: Áo Tấc (cho dịp trang trọng), Áo Nhật Bình (cho hoàng tộc/sang trọng), Áo Giao Lĩnh (thời Lê/cổ điển), Áo Viên Lĩnh, Áo Tứ Thân (dân dã/hội hè Bắc Bộ), Áo Ngũ Thân tay chẽn, Yếm lụa, Áo Mớ Ba Mớ Bảy.
+
+Chỉ thị quan trọng:
+1. Phân tích ngữ cảnh và lý do chọn lựa (ai_reasoning): Hãy phân tích sâu sắc tại sao bộ trang phục đó (như Áo Tấc, Nhật Bình, Giao Lĩnh, Viên Lĩnh, Tứ Thân, Ngũ Thân...) lại phù hợp hoàn hảo với tính chất sự kiện, không gian địa điểm, tính cách và thời tiết của người dùng thay vì chỉ chọn Áo Dài theo thói quen. CHỈ chọn Áo Dài khi tiêu chí người dùng thực sự chỉ phù hợp với Áo Dài hoặc người dùng chỉ định rõ.
+2. selected_outfit_id BẮT BUỘC phải là một 'id' chính xác có trong danh sách trang phục được cung cấp (AVAILABLE WARDROBE INVENTORY). Tuyệt đối không tự bịa ID.
+3. Cung cấp match_score (từ 85 đến 99), lý giải ai_reasoning mang tính học thuật và thẩm mỹ cao, cùng hướng dẫn phối đồ styling_tips chi tiết (phụ kiện, hài/guốc, cách vấn khăn hoặc trang sức đi kèm).`;
 
     const userPrompt = `
-=== CLIENT STYLE PROFILE ===
-Name: ${user_profile?.name || 'Client'}
-Age: ${user_profile?.age || '??'}
-Style Personalities: ${user_profile?.personalities?.join(', ') || 'Chic, Minimalist'}
-Hobbies & Interests: ${user_profile?.hobbies?.join(', ') || 'Art, Dining, Travel'}
-Favorite Color: ${user_profile?.favourite_color || 'Light Yellow'}
+=== HỒ SƠ PHONG CÁCH NGƯỜI DÙNG ===
+Họ và tên: ${user_profile?.name || 'Khách Quý'}
+Độ tuổi: ${user_profile?.age || '26'}
+Tính cách / Phong cách: ${user_profile?.personalities?.join(', ') || 'Thanh lịch, Hoài cổ'}
+Sở thích & Quan tâm: ${user_profile?.hobbies?.join(', ') || 'Nghệ thuật, Văn hóa di sản'}
+Màu sắc yêu thích: ${user_profile?.favourite_color || 'Tự nhiên'}
 
-=== UPCOMING EVENT CONTEXT ===
-Event Name: ${event_context.event_name}
-Place / Venue: ${event_context.event_place}
-Event Type: ${event_context.event_type}
-Dress Code / Notes: ${event_context.dress_code || 'Appropriate for venue'}
-Weather / Season: ${event_context.weather_notes || 'Pleasant'}
+=== BỐI CẢNH SỰ KIỆN ===
+Tên sự kiện: ${event_context.event_name}
+Địa điểm / Không gian: ${event_context.event_place}
+Dịp / Phân loại sự kiện: ${event_context.event_type}
+Quy định trang phục (Dress Code): ${event_context.dress_code || 'Trang phục truyền thống tao nhã'}
+Thời tiết / Mùa: ${event_context.weather_notes || 'Thuận lợi'}
 
-=== USER'S HISTORICAL RATINGS ===
+=== LỊCH SỬ ĐÁNH GIÁ CỦA NGƯỜI DÙNG ===
 ${pastRatingsText}
 
-=== USER'S MIX & MATCH EXPERIMENTS ===
+=== THỬ NGHIỆM MIX & MATCH GẦN ĐÂY ===
 ${mixHistoryText}
 
-=== AVAILABLE WARDROBE INVENTORY ===
+=== DANH SÁCH TRANG PHỤC CÓ SẴN (AVAILABLE WARDROBE INVENTORY) ===
 ${JSON.stringify(catalogSummary, null, 2)}
 `;
 
@@ -218,9 +206,10 @@ ${JSON.stringify(catalogSummary, null, 2)}
       });
     } catch (genaiErr: any) {
       console.error('Gemini Flash call failed:', genaiErr?.message);
+      const isOverloaded = genaiErr?.message?.includes('503') || genaiErr?.message?.includes('high demand') || genaiErr?.status === 503;
       return NextResponse.json(
-        { error: genaiErr?.message || 'Lỗi máy chủ' },
-        { status: 500 }
+        { error: isOverloaded ? 'Máy chủ AI đang quá tải, vui lòng thử lại sau giây lát.' : (genaiErr?.message || 'Lỗi máy chủ') },
+        { status: isOverloaded ? 503 : 500 }
       );
     }
 

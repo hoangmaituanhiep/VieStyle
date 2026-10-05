@@ -86,32 +86,19 @@ app.post('/api/recommend-outfit', async (req, res) => {
       try {
         let cachedRow: any = null;
 
-        // 1.1 Thử tìm khớp chính xác event_type và event_place
-        if (inputEventPlace) {
+        // 1.1 Thử tìm khớp chính xác event_name, event_type và event_place
+        if (inputEventPlace && inputEventName) {
           const { data: exactMatch } = await supabase
             .from('suggestions_history')
             .select('*')
             .eq('event_type', inputEventType)
             .eq('event_place', inputEventPlace)
+            .eq('event_name', inputEventName)
             .order('created_at', { ascending: false })
             .limit(1);
 
           if (exactMatch && exactMatch.length > 0 && exactMatch[0]?.outfit_id) {
             cachedRow = exactMatch[0];
-          }
-        }
-
-        // 1.2 Nếu chưa thấy, tìm gợi ý gần nhất theo event_type
-        if (!cachedRow) {
-          const { data: typeMatch } = await supabase
-            .from('suggestions_history')
-            .select('*')
-            .eq('event_type', inputEventType)
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          if (typeMatch && typeMatch.length > 0 && typeMatch[0]?.outfit_id) {
-            cachedRow = typeMatch[0];
           }
         }
 
@@ -181,41 +168,92 @@ app.post('/api/recommend-outfit', async (req, res) => {
       return [];
     };
 
-    // Mảng rút gọn của các trang phục hiện có (chỉ gửi id, name, event_types, style_tags để tiết kiệm Context Window)
+    // Mảng dữ liệu trang phục đầy đủ gửi tới AI để hiểu rõ kiểu dáng, hoa văn, chất liệu
     const compactCatalog = available_outfits.map((o: any) => ({
       id: o.id,
       name: o.name,
+      description: o.description,
       event_types: safeArray(o.event_types),
       style_tags: safeArray(o.style_tags),
+      colors: safeArray(o.colors),
     }));
 
+    // System Prompt chuyên gia Cổ Phục & chống thiên kiến Áo Dài
+    const systemInstruction = `Bạn là một chuyên gia hàng đầu về Cổ phục và Trang phục truyền thống Việt Nam.
+
+TUYỆT ĐỐI KHÔNG được lạm dụng Áo Dài. Bạn PHẢI xem xét và ưu tiên gợi ý các loại trang phục đa dạng khác dựa trên tiêu chí của người dùng, bao gồm nhưng không giới hạn: Áo Tấc (cho dịp trang trọng), Áo Nhật Bình (cho hoàng tộc/sang trọng), Áo Giao Lĩnh (thời Lê/cổ điển), Áo Viên Lĩnh, Áo Tứ Thân (dân dã/hội hè Bắc Bộ), Áo Ngũ Thân tay chẽn, Yếm lụa, Áo Mớ Ba Mớ Bảy.
+
+Chỉ thị bắt buộc:
+1. Phân tích ngữ cảnh và lý do chọn lựa (ai_reasoning): Hãy phân tích sâu sắc tại sao bộ trang phục đó (như Áo Tấc, Nhật Bình, Giao Lĩnh, Viên Lĩnh, Tứ Thân, Ngũ Thân...) lại phù hợp hoàn hảo với tính chất sự kiện, không gian địa điểm, tính cách và thời tiết của người dùng thay vì chỉ chọn Áo Dài theo thói quen. CHỈ chọn Áo Dài khi tiêu chí người dùng thực sự chỉ phù hợp với Áo Dài hoặc người dùng chỉ định rõ.
+2. outfit_id BẮT BUỘC phải là một 'id' chính xác có trong danh sách trang phục được cung cấp. Tuyệt đối không tự bịa ID.
+3. Cung cấp match_score (85-99), ai_reasoning tinh tế đậm đà văn hóa và styling_tips phụ kiện chi tiết.`;
+
     // Câu lệnh prompt yêu cầu AI theo chuẩn tối ưu cực hạn
-    const userPrompt = `Bạn là hệ thống match trang phục. Dựa vào yêu cầu của người dùng, hãy chọn ra 1 trang phục phù hợp nhất từ danh sách. BẮT BUỘC chỉ trả về 1 chuỗi JSON duy nhất, không có văn bản giải thích, không bọc markdown (\`\`\`json). Cấu trúc: {"outfit_id": "chuỗi_uuid_được_chọn"}.
+    const userPrompt = `Dựa vào hồ sơ người dùng và hoàn cảnh sự kiện dưới đây, hãy chọn ra 1 trang phục cổ phục / truyền thống phù hợp nhất từ kho trang phục.
 
 Yêu cầu người dùng:
 - Sự kiện: ${inputEventName || ''} (${inputEventType || ''})
 - Địa điểm: ${inputEventPlace || ''}
 ${event_context.dress_code ? `- Dress code: ${event_context.dress_code}` : ''}
+${event_context.weather_notes ? `- Thời tiết / Bối cảnh: ${event_context.weather_notes}` : ''}
 ${user_profile?.favourite_color ? `- Màu ưa thích: ${user_profile.favourite_color}` : ''}
 ${user_profile?.personalities?.length ? `- Phong cách: ${user_profile.personalities.join(', ')}` : ''}
+${user_profile?.hobbies?.length ? `- Sở thích: ${user_profile.hobbies.join(', ')}` : ''}
 
-Danh sách trang phục:
-${JSON.stringify(compactCatalog)}`;
+Lịch sử đánh giá của người dùng:
+${pastRatingsText}
+
+Thử nghiệm Mix & Match gần đây:
+${mixHistoryText}
+
+Danh sách trang phục trong kho:
+${JSON.stringify(compactCatalog, null, 2)}`;
 
     let response;
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: userPrompt,
-        config: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-        },
-      });
-    } catch (genaiError: any) {
-      console.error('Call to Gemini Flash failed:', genaiError?.message);
-      return res.status(500).json({
-        error: genaiError?.message || 'Lỗi máy chủ',
+    let lastError: any = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: userPrompt,
+          config: {
+            systemInstruction,
+            temperature: 0.35,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                outfit_id: { type: Type.STRING },
+                match_score: { type: Type.INTEGER },
+                ai_reasoning: { type: Type.STRING },
+                styling_tips: { type: Type.STRING },
+                vibe_keywords: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+              },
+              required: ['outfit_id', 'ai_reasoning', 'styling_tips'],
+            },
+          },
+        });
+        if (response) break;
+      } catch (err: any) {
+        lastError = err;
+        const isDemand = err?.message?.includes('503') || err?.message?.includes('high demand') || err?.status === 503;
+        if (attempt === 0 && isDemand) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (!response) {
+      console.warn('Gemini Flash call encountered issue, falling back to heuristic engine:', lastError?.message);
+      const fallbackRec = generateRuleBasedRecommendation(user_profile, event_context, past_ratings, mix_history, available_outfits);
+      return res.json({
+        ...fallbackRec,
+        engine: 'fallback_heuristic',
       });
     }
 
@@ -242,6 +280,8 @@ ${JSON.stringify(compactCatalog)}`;
     if (!exists) {
       selectedOutfitId = available_outfits[0].id;
     }
+
+    const matchedOutfit = available_outfits.find((o: any) => o.id === selectedOutfitId);
 
     // Lưu kết quả này vào bảng suggestions_history để làm Caching cho những user/lần sau
     if (supabase) {
@@ -276,6 +316,11 @@ ${JSON.stringify(compactCatalog)}`;
       outfit_id: selectedOutfitId,
       recommendation: {
         selected_outfit_id: selectedOutfitId,
+        match_score: parsed?.match_score || 95,
+        ai_reasoning: parsed?.ai_reasoning || `Thiết kế "${matchedOutfit?.name || 'Cổ phục'}" mang lại phong thái trang nhã, đúng chuẩn mực nghi thức cho ${inputEventName || inputEventType} tại ${inputEventPlace || 'không gian sự kiện'}.`,
+        styling_tips: parsed?.styling_tips || `Kết hợp cùng hài nhung truyền thống, trang sức bạc đúc thủ công và giữ nét chỉn chu trong từng tà áo.`,
+        alternative_outfit_id: available_outfits.find((o: any) => o.id !== selectedOutfitId)?.id || selectedOutfitId,
+        vibe_keywords: parsed?.vibe_keywords || ['Cổ Phục', 'Di Sản', 'Đúng Chuẩn'],
       },
       engine: 'gemini-3.8-flash',
     });
@@ -298,7 +343,7 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Hugging Face SDXL Inference API)
+// API Route: AI Mix & Match Image Generation (Pollinations Flux Pro Static URL)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
@@ -309,11 +354,6 @@ app.post('/api/generate-outfit-image', async (req, res) => {
       background_vibe,
       style_notes,
     } = req.body || {};
-
-    // 2. Tích hợp Hugging Face API: Kiểm tra API Key
-    if (!process.env.HUGGINGFACE_API_KEY) {
-      throw new Error('Thiếu HUGGINGFACE_API_KEY');
-    }
 
     // 1. Fallback & chuẩn hóa các biến
     const accessoriesText =
@@ -328,71 +368,27 @@ app.post('/api/generate-outfit-image', async (req, res) => {
     const settingText =
       background_vibe || 'courtyard of Imperial Citadel of Hue with ancient weathered moss-stone architecture';
 
-    const styleNotes = style_notes || '';
+    const styleNotesText = style_notes || '';
 
-    // 1. Giữ nguyên Master Prompt Template (chuẩn Nhiếp ảnh gia, không dùng Gemini API)
-    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 85mm lens, f/1.8, natural cinematic lighting, depth of field. Full-length scenery portrait of a gorgeous Vietnamese female model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features premium flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing in ${settingText}. Hyperrealistic fabric texture, vivid colors, editorial high-fashion Vogue magazine cover, 8k resolution, ultra-detailed face and background${styleNotes ? ', ' + style_notes : ''}.`;
+    // Master Prompt Template góc rộng lấy cảnh sắc nét (35mm f/8)
+    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a gorgeous Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features premium flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''}.`;
 
-    // 2. Dùng fetch gọi POST tới endpoint Hugging Face SDXL
-    const hfResponse = await fetch(
-      'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: promptText }),
-      }
-    );
-
-    // 4. Xử lý lỗi đặc thù (Model Loading - 503)
-    if (hfResponse.status === 503) {
-      return res.status(503).json({
-        error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây',
-      });
-    }
-
-    if (!hfResponse.ok) {
-      let errorMsg = `Hugging Face API lỗi (${hfResponse.status})`;
-      try {
-        const errJson: any = await hfResponse.json();
-        if (errJson?.error) {
-          if (
-            typeof errJson.error === 'string' &&
-            errJson.error.toLowerCase().includes('loading')
-          ) {
-            return res.status(503).json({
-              error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây',
-            });
-          }
-          errorMsg = errJson.error;
-        }
-      } catch (_) {
-        // Non-JSON error
-      }
-      return res.status(hfResponse.status >= 500 ? hfResponse.status : 500).json({
-        error: errorMsg,
-      });
-    }
-
-    // 3. Xử lý kết quả trả về nhị phân -> base64
-    const buffer = Buffer.from(await hfResponse.arrayBuffer());
-    const base64Image = buffer.toString('base64');
-    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
+    // 2. Tạo URL Pollinations Flux Pro
+    const encodedPrompt = encodeURIComponent(promptText);
+    const finalImageUrl =
+      'https://image.pollinations.ai/prompt/' +
+      encodedPrompt +
+      '?width=800&height=1000&nologo=true&model=flux-pro';
 
     return res.json({
-      imageUrl,
-      image_url: imageUrl,
+      imageUrl: finalImageUrl,
+      image_url: finalImageUrl,
       prompt_used: promptText,
     });
   } catch (error: any) {
     console.error('Outfit image generation server error:', error);
-    const isModelLoading = error?.message?.includes('khởi động') || error?.status === 503;
-    return res.status(isModelLoading ? 503 : 500).json({
-      error: isModelLoading
-        ? 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây'
-        : error?.message || 'Lỗi máy chủ',
+    return res.status(500).json({
+      error: error?.message || 'Lỗi máy chủ',
     });
   }
 });
