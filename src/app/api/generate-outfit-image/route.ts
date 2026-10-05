@@ -1,147 +1,110 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import {
-  buildMasterOutfitPrompt,
-  buildGeminiPromptInstruction,
-  buildGeminiMultimodalPrompt,
-  buildPollinationsUrl,
-} from '../../../lib/outfit-prompt-builder';
 
 /**
  * Next.js App Router API Route: /api/generate-outfit-image
- * Combination of Sample Image Multimodal Vision Analysis + Master Vietnamese Costume Anatomy + Gemini Expansion + Pollinations Flux
+ * Mix & Match Image Generation using Hugging Face Inference API (Stable Diffusion XL)
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      garment_type,
-      garment_image_url,
-      garment_description,
-      garment_tags,
-      garment_colors,
-      accessories,
-      primary_color,
+      garment_type = 'traditional Vietnamese dress',
+      accessories = [],
+      primary_color = 'Crimson Red',
       secondary_color,
       background_vibe,
-      pose_framing,
-      lighting_mood,
       style_notes,
-      seed: reqSeed,
     } = body || {};
 
-    if (!garment_type || !primary_color) {
+    // 2. Tích hợp Hugging Face API: Kiểm tra API Key
+    if (!process.env.HUGGINGFACE_API_KEY) {
+      throw new Error('Thiếu HUGGINGFACE_API_KEY');
+    }
+
+    // 1. Fallback & chuẩn hóa các biến
+    const accessoriesText =
+      Array.isArray(accessories) && accessories.length > 0
+        ? accessories.join(', ')
+        : 'traditional Vietnamese silver filigree jewelry';
+
+    const colorScheme = secondary_color
+      ? `${primary_color} with accents of ${secondary_color}`
+      : `monochromatic ${primary_color}`;
+
+    const settingText =
+      background_vibe || 'courtyard of Imperial Citadel of Hue with ancient weathered moss-stone architecture';
+
+    const styleNotes = style_notes || '';
+
+    // 1. Giữ nguyên Master Prompt Template (chuẩn Nhiếp ảnh gia, không dùng Gemini API)
+    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 85mm lens, f/1.8, natural cinematic lighting, depth of field. Full-length scenery portrait of a gorgeous Vietnamese female model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features premium flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing in ${settingText}. Hyperrealistic fabric texture, vivid colors, editorial high-fashion Vogue magazine cover, 8k resolution, ultra-detailed face and background${styleNotes ? ', ' + style_notes : ''}.`;
+
+    // 2. Dùng fetch gọi POST tới endpoint Hugging Face SDXL
+    const response = await fetch(
+      'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: promptText }),
+      }
+    );
+
+    // 4. Xử lý lỗi đặc thù (Model Loading - 503)
+    if (response.status === 503) {
       return NextResponse.json(
-        { error: 'Thiếu thông tin bắt buộc: garment_type hoặc primary_color.' },
-        { status: 400 }
+        { error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây' },
+        { status: 503 }
       );
     }
 
-    // 1. Sinh master prompt chuẩn mực với cấu trúc chi tiết cổ phục/trang phục, phụ kiện và màu sắc
-    const { promptText: masterPrompt, seed } = buildMasterOutfitPrompt({
-      garment_type,
-      garment_image_url,
-      garment_description,
-      garment_tags,
-      garment_colors,
-      accessories,
-      primary_color,
-      secondary_color,
-      background_vibe,
-      pose_framing,
-      lighting_mood,
-      style_notes,
-      seed: typeof reqSeed === 'number' ? reqSeed : undefined,
-    });
-
-    let promptText = masterPrompt;
-
-    // 2. Tải và chuẩn bị ảnh mẫu (Sample Image) nếu được cung cấp để Gemini Vision phân tích
-    let sampleImagePart: any = null;
-    if (garment_image_url && typeof garment_image_url === 'string' && garment_image_url.startsWith('http')) {
+    if (!response.ok) {
+      let errorMessage = `Hugging Face API lỗi (${response.status})`;
       try {
-        const imgFetch = await fetch(garment_image_url, { signal: AbortSignal.timeout(6000) });
-        if (imgFetch.ok) {
-          const arrBuf = await imgFetch.arrayBuffer();
-          const mime = (imgFetch.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-          sampleImagePart = {
-            inlineData: {
-              data: Buffer.from(arrBuf).toString('base64'),
-              mimeType: mime,
-            },
-          };
-        }
-      } catch (imgErr: any) {
-        console.warn('Could not fetch sample image for Gemini Vision analysis:', imgErr?.message);
-      }
-    }
-
-    // 3. Phân tích trực tiếp ảnh mẫu qua Gemini Multimodal Vision nếu có API key
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      try {
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const details = {
-          garment_type,
-          garment_image_url,
-          garment_description,
-          garment_tags,
-          garment_colors,
-          accessories,
-          primary_color,
-          secondary_color,
-          background_vibe,
-          pose_framing,
-          lighting_mood,
-          style_notes,
-        };
-
-        const geminiInstruction = sampleImagePart
-          ? buildGeminiMultimodalPrompt(details, masterPrompt)
-          : buildGeminiPromptInstruction(details, masterPrompt);
-
-        const geminiContents: any[] = sampleImagePart
-          ? [sampleImagePart, geminiInstruction]
-          : [geminiInstruction];
-
-        const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
-        for (const modelName of candidateModels) {
-          try {
-            const model = genAI.getGenerativeModel({ model: modelName });
-            const result = await model.generateContent(geminiContents);
-            const candidateText = result.response.text().trim();
-            if (candidateText && candidateText.length > 50) {
-              promptText = candidateText
-                .replace(/^```[a-z]*\s*/i, '')
-                .replace(/\s*```$/i, '')
-                .replace(/^["'`]+|["'`]+$/g, '')
-                .trim();
-              break;
-            }
-          } catch (modelErr: any) {
-            console.warn(`Gemini (${modelName}) failed:`, modelErr?.message);
+        const errorData = await response.json();
+        if (errorData?.error) {
+          if (
+            typeof errorData.error === 'string' &&
+            errorData.error.toLowerCase().includes('loading')
+          ) {
+            return NextResponse.json(
+              { error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây' },
+              { status: 503 }
+            );
           }
+          errorMessage = errorData.error;
         }
-      } catch (err: any) {
-        console.warn('Gemini client attempt error:', err?.message);
+      } catch (_) {
+        // Non-JSON response
       }
+      return NextResponse.json(
+        { error: errorMessage },
+        { status: response.status >= 500 ? response.status : 500 }
+      );
     }
 
-    // 4. Tạo URL ảnh tĩnh độ nét cao với Pollinations Flux và seed ngẫu nhiên
-    const finalImageUrl = buildPollinationsUrl(promptText, seed);
+    // 3. Xử lý kết quả trả về nhị phân -> base64
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const base64Image = buffer.toString('base64');
+    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
 
     return NextResponse.json({
-      success: true,
-      imageUrl: finalImageUrl,
-      image_url: finalImageUrl,
+      imageUrl,
+      image_url: imageUrl,
       prompt_used: promptText,
-      seed,
     });
   } catch (error: any) {
     console.error('Error generating outfit image:', error?.message);
+    const isModelLoading = error?.message?.includes('khởi động') || error?.status === 503;
     return NextResponse.json(
-      { error: error?.message || 'Lỗi máy chủ' },
-      { status: 500 }
+      {
+        error: isModelLoading
+          ? 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây'
+          : error?.message || 'Lỗi máy chủ',
+      },
+      { status: isModelLoading ? 503 : 500 }
     );
   }
 }

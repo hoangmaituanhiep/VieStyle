@@ -4,12 +4,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import {
-  buildMasterOutfitPrompt,
-  buildGeminiPromptInstruction,
-  buildGeminiMultimodalPrompt,
-  buildPollinationsUrl,
-} from './src/lib/outfit-prompt-builder';
 
 dotenv.config();
 
@@ -17,7 +11,7 @@ dotenv.config();
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json());
 
@@ -304,131 +298,101 @@ app.get('/api/supabase-config', (req, res) => {
   });
 });
 
-// API Route: AI Mix & Match Image Generation (Master Prompt Generator + Gemini Expansion + Pollinations Flux)
+// API Route: AI Mix & Match Image Generation (Hugging Face SDXL Inference API)
 app.post('/api/generate-outfit-image', async (req, res) => {
   try {
     const {
-      garment_type,
-      garment_image_url,
-      garment_description,
-      garment_tags,
-      garment_colors,
-      accessories,
-      primary_color,
+      garment_type = 'traditional Vietnamese dress',
+      accessories = [],
+      primary_color = 'Crimson Red',
       secondary_color,
       background_vibe,
-      pose_framing,
-      lighting_mood,
       style_notes,
-      seed: reqSeed,
     } = req.body || {};
 
-    if (!garment_type || !primary_color) {
-      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc: garment_type hoặc primary_color.' });
+    // 2. Tích hợp Hugging Face API: Kiểm tra API Key
+    if (!process.env.HUGGINGFACE_API_KEY) {
+      throw new Error('Thiếu HUGGINGFACE_API_KEY');
     }
 
-    // 1. Sinh master prompt chuẩn mực với cấu trúc chi tiết cổ phục/trang phục, phụ kiện và màu sắc
-    const { promptText: masterPrompt, seed } = buildMasterOutfitPrompt({
-      garment_type,
-      garment_image_url,
-      garment_description,
-      garment_tags,
-      garment_colors,
-      accessories,
-      primary_color,
-      secondary_color,
-      background_vibe,
-      pose_framing,
-      lighting_mood,
-      style_notes,
-      seed: typeof reqSeed === 'number' ? reqSeed : undefined,
-    });
+    // 1. Fallback & chuẩn hóa các biến
+    const accessoriesText =
+      Array.isArray(accessories) && accessories.length > 0
+        ? accessories.join(', ')
+        : 'traditional Vietnamese silver filigree jewelry';
 
-    let promptText = masterPrompt;
+    const colorScheme = secondary_color
+      ? `${primary_color} with accents of ${secondary_color}`
+      : `monochromatic ${primary_color}`;
 
-    // 2. Tải và chuẩn bị ảnh mẫu (Sample Image) nếu được cung cấp để Gemini Vision phân tích
-    let sampleImagePart: any = null;
-    if (garment_image_url && typeof garment_image_url === 'string' && garment_image_url.startsWith('http')) {
+    const settingText =
+      background_vibe || 'courtyard of Imperial Citadel of Hue with ancient weathered moss-stone architecture';
+
+    const styleNotes = style_notes || '';
+
+    // 1. Giữ nguyên Master Prompt Template (chuẩn Nhiếp ảnh gia, không dùng Gemini API)
+    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 85mm lens, f/1.8, natural cinematic lighting, depth of field. Full-length scenery portrait of a gorgeous Vietnamese female model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features premium flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing in ${settingText}. Hyperrealistic fabric texture, vivid colors, editorial high-fashion Vogue magazine cover, 8k resolution, ultra-detailed face and background${styleNotes ? ', ' + style_notes : ''}.`;
+
+    // 2. Dùng fetch gọi POST tới endpoint Hugging Face SDXL
+    const hfResponse = await fetch(
+      'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: promptText }),
+      }
+    );
+
+    // 4. Xử lý lỗi đặc thù (Model Loading - 503)
+    if (hfResponse.status === 503) {
+      return res.status(503).json({
+        error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây',
+      });
+    }
+
+    if (!hfResponse.ok) {
+      let errorMsg = `Hugging Face API lỗi (${hfResponse.status})`;
       try {
-        const imgFetch = await fetch(garment_image_url, { signal: AbortSignal.timeout(6000) });
-        if (imgFetch.ok) {
-          const arrBuf = await imgFetch.arrayBuffer();
-          const mime = (imgFetch.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-          sampleImagePart = {
-            inlineData: {
-              data: Buffer.from(arrBuf).toString('base64'),
-              mimeType: mime,
-            },
-          };
-        }
-      } catch (imgErr: any) {
-        console.warn('Could not fetch sample image for Gemini Vision analysis:', imgErr?.message);
-      }
-    }
-
-    // 3. Nếu có GEMINI_API_KEY, phân tích trực tiếp ảnh mẫu qua Gemini Multimodal Vision
-    const ai = getGeminiClient();
-    if (ai) {
-      const details = {
-        garment_type,
-        garment_image_url,
-        garment_description,
-        garment_tags,
-        garment_colors,
-        accessories,
-        primary_color,
-        secondary_color,
-        background_vibe,
-        pose_framing,
-        lighting_mood,
-        style_notes,
-      };
-
-      const geminiInstruction = sampleImagePart
-        ? buildGeminiMultimodalPrompt(details, masterPrompt)
-        : buildGeminiPromptInstruction(details, masterPrompt);
-
-      const geminiContents: any[] = sampleImagePart
-        ? [sampleImagePart, geminiInstruction]
-        : [geminiInstruction];
-
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
-      for (const modelName of candidateModels) {
-        try {
-          const geminiRes = await ai.models.generateContent({
-            model: modelName,
-            contents: geminiContents,
-          });
-          const candidateText = (geminiRes.text || '').trim();
-          if (candidateText && candidateText.length > 50) {
-            // Loại bỏ bọc markdown hoặc quote nếu có
-            promptText = candidateText
-              .replace(/^```[a-z]*\s*/i, '')
-              .replace(/\s*```$/i, '')
-              .replace(/^["'`]+|["'`]+$/g, '')
-              .trim();
-            break;
+        const errJson: any = await hfResponse.json();
+        if (errJson?.error) {
+          if (
+            typeof errJson.error === 'string' &&
+            errJson.error.toLowerCase().includes('loading')
+          ) {
+            return res.status(503).json({
+              error: 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây',
+            });
           }
-        } catch (genErr: any) {
-          console.warn(`Gemini attempt (${modelName}) failed:`, genErr?.message);
+          errorMsg = errJson.error;
         }
+      } catch (_) {
+        // Non-JSON error
       }
+      return res.status(hfResponse.status >= 500 ? hfResponse.status : 500).json({
+        error: errorMsg,
+      });
     }
 
-    // 3. Tạo URL ảnh độ nét cao qua Pollinations với model Flux và seed ngẫu nhiên
-    const finalImageUrl = buildPollinationsUrl(promptText, seed);
+    // 3. Xử lý kết quả trả về nhị phân -> base64
+    const buffer = Buffer.from(await hfResponse.arrayBuffer());
+    const base64Image = buffer.toString('base64');
+    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
 
     return res.json({
-      success: true,
-      imageUrl: finalImageUrl,
-      image_url: finalImageUrl,
+      imageUrl,
+      image_url: imageUrl,
       prompt_used: promptText,
-      seed,
     });
   } catch (error: any) {
     console.error('Outfit image generation server error:', error);
-    return res.status(500).json({
-      error: error?.message || 'Lỗi máy chủ không xác định khi tạo ảnh.',
+    const isModelLoading = error?.message?.includes('khởi động') || error?.status === 503;
+    return res.status(isModelLoading ? 503 : 500).json({
+      error: isModelLoading
+        ? 'Mô hình vẽ ảnh đang khởi động, vui lòng thử lại sau 20 giây'
+        : error?.message || 'Lỗi máy chủ',
     });
   }
 });
@@ -550,31 +514,8 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`VieStyle Server running on http://localhost:${PORT}`);
-    const supabase = getSupabaseServerClient();
-    if (supabase) {
-      supabase.from('outfits').select('id, name, image_url, description').then(({ data, error }) => {
-        console.log(`--- CURRENT DB OUTFITS (COUNT: ${data?.length || 0}) ---`);
-        if (data) {
-          data.forEach((o) => console.log(`ID: ${o.id} | NAME: ${o.name} | IMG: ${o.image_url}`));
-        }
-        if (error) console.error('Supabase error:', error.message);
-      });
-    }
-  });
-
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`\n❌ Cổng ${PORT} đang bị chiếm dụng bởi một tiến trình Node/server khác.`);
-      console.error(`👉 Cách xử lý:`);
-      console.error(`   1. Tắt tiến trình đang chiếm port ${PORT} bằng lệnh PowerShell:`);
-      console.error(`      Stop-Process -Id (Get-NetTCPConnection -LocalPort ${PORT}).OwningProcess -Force`);
-      console.error(`   2. Hoặc đổi sang port khác: set PORT=3001 && npm run dev (hoặc ghi PORT=3001 vào file .env)\n`);
-      process.exit(1);
-    } else {
-      console.error('Server error:', err);
-    }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`AuraStyle Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
