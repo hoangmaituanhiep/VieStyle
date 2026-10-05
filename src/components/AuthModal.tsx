@@ -131,6 +131,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Hoàng Lan Anh"
+                  style={{ fontFamily: 'Arial, Helvetica, sans-serif', textTransform: 'none', letterSpacing: 'normal' }}
                   className="w-full pl-10 pr-4 py-2.5 bg-[#FFFFFF] border border-[#EBE4D8] rounded-sm text-[#141210] text-xs focus:outline-none focus:border-[#8B1E1E] transition-colors"
                 />
               </div>
@@ -150,6 +151,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="lananh@viestyle.vn"
+                style={{ fontFamily: 'Arial, Helvetica, sans-serif', textTransform: 'none', letterSpacing: 'normal' }}
                 className="w-full pl-10 pr-4 py-2.5 bg-[#FFFFFF] border border-[#EBE4D8] rounded-sm text-[#141210] text-xs focus:outline-none focus:border-[#8B1E1E] transition-colors"
               />
             </div>
@@ -169,6 +171,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                style={{ fontFamily: 'Arial, Helvetica, sans-serif', textTransform: 'none', letterSpacing: 'normal' }}
                 className="w-full pl-10 pr-4 py-2.5 bg-[#FFFFFF] border border-[#EBE4D8] rounded-sm text-[#141210] text-xs focus:outline-none focus:border-[#8B1E1E] transition-colors"
               />
             </div>

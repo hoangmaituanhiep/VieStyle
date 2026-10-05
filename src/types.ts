@@ -7,6 +7,7 @@ export interface Profile {
   email?: string;
   name?: string;
   avatar_url?: string;
+  gender?: 'nam' | 'nữ' | string;
   created_at?: string;
   updated_at?: string;
 }
@@ -27,6 +28,7 @@ export interface UserPreferences {
   user_id: string;       // References auth.users(id)
   name: string;
   age: number;
+  gender?: 'nam' | 'nữ' | string;
   personalities: string[]; // e.g. ['Avant-Garde', 'Minimalist', 'Extroverted']
   hobbies: string[];       // e.g. ['Art Galleries', 'Fine Dining', 'Live Music']
   favourite_color: string; // e.g. 'Midnight Blue' or '#1E293B'

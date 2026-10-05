@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   email TEXT,
   name TEXT,
   age INTEGER,
+  gender TEXT DEFAULT 'nữ',
   personalities TEXT[] DEFAULT '{}',
   hobbies TEXT[] DEFAULT '{}',
   favourite_color TEXT,

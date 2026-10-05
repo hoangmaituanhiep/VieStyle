@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
 import { MixMatchStudioView } from './components/MixMatchStudioView';
@@ -190,45 +191,47 @@ export default function App() {
 
       const storedConfig = getStoredSupabaseConfig();
 
-      // Call Full-Stack Backend API route (/api/recommend-outfit) with Supabase Caching
-      const res = await fetch('/api/recommend-outfit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id,
-          user_profile: activePrefs,
-          event_context: eventContext,
-          past_ratings: pastRatingsSummary,
-          mix_history: mixHistory,
-          available_outfits: outfits,
-          supabase_url: storedConfig.url,
-          supabase_key: storedConfig.key,
-        }),
+      // 1. Làm sạch dữ liệu trước khi gửi (Sanitize Payload)
+      // Loại bỏ toàn bộ dữ liệu ảnh nặng (base64) và metadata không cần thiết khỏi danh mục trang phục
+      const cleanOutfits = outfits.map((o) => {
+        const item: any = { ...o };
+        delete item.imageUrl;
+        delete item.base64Image;
+        delete item.image_base64;
+        delete item.history;
+        if (typeof item.image_url === 'string' && item.image_url.startsWith('data:')) {
+          delete item.image_url;
+        }
+        return item;
       });
 
-      // BẮT BUỘC kiểm tra Content-Type trước khi gọi await res.json() để tránh lỗi HTML crash
-      if (!res.headers.get('content-type')?.includes('application/json')) {
-        throw new Error('API không trả về JSON');
-      }
+      // Tạo bản sao của state dữ liệu
+      const payload: any = {
+        user_id: user?.id,
+        user_profile: activePrefs,
+        event_context: eventContext,
+        past_ratings: pastRatingsSummary,
+        mix_history: mixHistory.map((m) => {
+          const item: any = { ...m };
+          delete item.imageUrl;
+          delete item.base64Image;
+          delete item.image_url;
+          return item;
+        }),
+        available_outfits: cleanOutfits,
+        supabase_url: storedConfig.url,
+        supabase_key: storedConfig.key,
+      };
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const errMessage = errData?.error || `Lỗi máy chủ AI (${res.status})`;
+      // Chủ động xóa bỏ toàn bộ các key chứa ảnh hoặc lịch sử nặng khỏi payload theo Hard-Fix
+      delete payload.imageUrl;
+      delete payload.base64Image;
+      delete payload.history;
 
-        if (
-          res.status === 503 ||
-          errMessage.includes('503') ||
-          errMessage.toLowerCase().includes('quá tải') ||
-          errMessage.toLowerCase().includes('high demand') ||
-          errMessage.toLowerCase().includes('overloaded')
-        ) {
-          throw new Error('Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.');
-        }
+      // 2. Cập nhật luồng gọi API: Truyền biến payload đã được làm sạch
+      const response = await axios.post('/api/recommend-outfit', payload);
+      const data = response.data;
 
-        throw new Error(errMessage);
-      }
-
-      const data = await res.json();
       const rawOutfitId = data.outfit_id || data.recommendation?.selected_outfit_id;
 
       if (!rawOutfitId) {
@@ -290,17 +293,20 @@ export default function App() {
       return displayRecord;
     } catch (err: any) {
       console.error('Styling error:', err);
+      const resStatus = err?.response?.status || err?.status;
+      const resMsg = err?.response?.data?.error || err?.message || '';
+
       const is503 =
-        err?.status === 503 ||
-        err?.message?.includes('503') ||
-        err?.message?.toLowerCase()?.includes('quá tải') ||
-        err?.message?.toLowerCase()?.includes('high demand') ||
-        err?.message?.toLowerCase()?.includes('overloaded') ||
-        err?.message?.toLowerCase()?.includes('resource_exhausted');
+        resStatus === 503 ||
+        resMsg.includes('503') ||
+        resMsg.toLowerCase().includes('quá tải') ||
+        resMsg.toLowerCase().includes('high demand') ||
+        resMsg.toLowerCase().includes('overloaded') ||
+        resMsg.toLowerCase().includes('resource_exhausted');
 
       const userMessage = is503
         ? 'Máy chủ AI đang quá tải, vui lòng thử lại sau vài phút.'
-        : (err?.message || 'Không thể tạo gợi ý trang phục. Vui lòng thử lại.');
+        : (resMsg || 'Không thể tạo gợi ý trang phục. Vui lòng thử lại.');
 
       showNotification(userMessage, 'error');
     } finally {
@@ -433,6 +439,7 @@ export default function App() {
             {activeTab === 'mix-match' && (
               <MixMatchStudioView
                 user={user}
+                preferences={preferences}
                 outfits={outfits}
                 mixHistory={mixHistory}
                 onSaveMix={handleSaveMixHistory}

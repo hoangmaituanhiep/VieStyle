@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { Sparkles, Palette, Check, RefreshCw, BookmarkPlus, Download, Eye, Layers, Compass, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { MixMatchItem, UserPreferences, Outfit, normalizeOutfitArray, normalizeOutfitValue } from '../types';
-import { fetchOutfits } from '../lib/supabase';
+import { fetchOutfits, getSupabaseClient } from '../lib/supabase';
 
 interface MixMatchStudioViewProps {
   user: any | null;
@@ -127,6 +128,34 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
   } | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
+  // Fetch & sync user profile (specifically gender) from preferences or Supabase
+  const [profileGender, setProfileGender] = useState<string>(preferences?.gender || 'nữ');
+
+  useEffect(() => {
+    if (preferences?.gender) {
+      setProfileGender(preferences.gender);
+    } else if (user?.id) {
+      const fetchProfile = async () => {
+        try {
+          const client = getSupabaseClient();
+          if (client) {
+            const { data } = await client
+              .from('profiles')
+              .select('gender')
+              .eq('id', user.id)
+              .maybeSingle();
+            if (data?.gender) {
+              setProfileGender(data.gender);
+            }
+          }
+        } catch (e) {
+          console.warn('Lỗi lấy profile gender trong Mix & Match:', e);
+        }
+      };
+      fetchProfile();
+    }
+  }, [preferences, user]);
+
   // Sync historyList whenever mixHistory prop updates
   useEffect(() => {
     if (mixHistory) {
@@ -147,30 +176,18 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
     setGenerationError(null);
 
     try {
-      const res = await fetch('/api/generate-outfit-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          garment_type: selectedGarmentName,
-          accessories: selectedAccessories,
-          primary_color: selectedPrimaryColor.name,
-          secondary_color: selectedAccentColor.name,
-          background_vibe: selectedBackdrop.prompt,
-        }),
+      const targetGender = profileGender || preferences?.gender || 'nữ';
+
+      const response = await axios.post('/api/generate-outfit-image', {
+        garment_type: selectedGarmentName,
+        accessories: selectedAccessories,
+        primary_color: selectedPrimaryColor.name,
+        secondary_color: selectedAccentColor.name,
+        background_vibe: selectedBackdrop.prompt,
+        gender: targetGender,
       });
 
-      // BẮT BUỘC kiểm tra Content-Type trước khi gọi await res.json()
-      if (!res.headers.get('content-type')?.includes('application/json')) {
-        throw new Error('API không trả về JSON (HTTP ' + res.status + ')');
-      }
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const errMessage = errData?.error || `Lỗi máy chủ (${res.status})`;
-        throw new Error(errMessage);
-      }
-
-      const data = await res.json();
+      const data = response.data;
       const imageUrl = data.imageUrl || data.image_url;
       if (!imageUrl) {
         throw new Error(data.error || 'Không nhận được dữ liệu hình ảnh.');

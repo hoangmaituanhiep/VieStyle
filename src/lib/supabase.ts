@@ -205,6 +205,7 @@ export async function fetchUserPreferences(userId: string): Promise<UserPreferen
         user_id: data.id,
         name: data.name || '',
         age: parsedAge,
+        gender: data.gender || 'nữ',
         personalities: parseStringOrArray(data.personalities),
         hobbies: parseStringOrArray(data.hobbies),
         favourite_color: data.favourite_color || '',
@@ -231,14 +232,16 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
   const hobbiesArray: string[] = parseStringOrArray(preferences.hobbies);
   const nameStr = (preferences.name || '').trim();
   const colorStr = (preferences.favourite_color || '').trim();
+  const genderStr = (preferences.gender === 'nam' ? 'nam' : 'nữ');
 
   // BẮT BUỘC: Sử dụng lệnh update để điền thông tin vào row đã có sẵn
-  // await supabase.from('profiles').update({ name, age, personalities, hobbies, favourite_color }).eq('id', user.id);
+  // await supabase.from('profiles').update({ name, age, gender, personalities, hobbies, favourite_color }).eq('id', user.id);
   const { data, error } = await client
     .from('profiles')
     .update({
       name: nameStr,
       age: ageInt,
+      gender: genderStr,
       personalities: personalitiesArray,
       hobbies: hobbiesArray,
       favourite_color: colorStr,
@@ -257,6 +260,7 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
     user_id: data?.id || userId,
     name: data?.name !== undefined && data?.name !== null ? data.name : nameStr,
     age: typeof data?.age === 'number' ? data.age : ageInt,
+    gender: data?.gender || genderStr,
     personalities: parseStringOrArray(data?.personalities || personalitiesArray),
     hobbies: parseStringOrArray(data?.hobbies || hobbiesArray),
     favourite_color: data?.favourite_color !== undefined && data?.favourite_color !== null ? data.favourite_color : colorStr,

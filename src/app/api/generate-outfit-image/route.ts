@@ -16,6 +16,7 @@ export async function POST(request: Request) {
       secondary_color,
       background_vibe,
       style_notes,
+      gender = 'nữ',
     } = body || {};
 
     // 1. Fallback & chuẩn hóa các biến
@@ -33,8 +34,13 @@ export async function POST(request: Request) {
 
     const styleNotesText = style_notes || '';
 
+    // Xử lý danh xưng và tính từ theo giới tính
+    const isMale = gender === 'nam' || gender === 'male';
+    const pronoun = isMale ? 'He' : 'She';
+    const modelAdjective = isMale ? 'handsome male' : 'gorgeous female';
+
     // 2. Master Prompt Template góc rộng lấy cảnh sắc nét (35mm f/8)
-    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a cute Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features Vietnamese flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''} that features Vietnamese culture and traditions.`;
+    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a ${modelAdjective} Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features Vietnamese flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. ${pronoun} is gracefully styled with ${accessoriesText}. ${pronoun} is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''} that features Vietnamese culture and traditions.`;
 
     // 3. Gọi Server SDXL Colab qua Ngrok bằng axios (không cần Authorization)
     const response = await axios.post(

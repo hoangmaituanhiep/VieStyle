@@ -49,6 +49,7 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
 }) => {
   const [name, setName] = useState(preferences?.name || user?.user_metadata?.name || user?.email?.split('@')[0] || '');
   const [age, setAge] = useState(preferences?.age?.toString() || '26');
+  const [gender, setGender] = useState<'nam' | 'nữ'>(preferences?.gender === 'nam' ? 'nam' : 'nữ');
   const [personalities, setPersonalities] = useState<string[]>(preferences?.personalities || ['Cung Đình Triều Nguyễn', 'Thanh Lịch Tinh Tế']);
   const [hobbies, setHobbies] = useState<string[]>(preferences?.hobbies || ['Triển Lãm & Tranh Lụa', 'Thưởng Trà Đạo']);
   const [favouriteColor, setFavouriteColor] = useState(preferences?.favourite_color || 'Đỏ Son Cung Đình');
@@ -62,6 +63,7 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
     if (preferences) {
       setName(preferences.name || '');
       setAge(preferences.age ? preferences.age.toString() : '26');
+      setGender(preferences.gender === 'nam' ? 'nam' : 'nữ');
       setPersonalities(preferences.personalities || []);
       setHobbies(preferences.hobbies || []);
       setFavouriteColor(preferences.favourite_color || 'Đỏ Son Cung Đình');
@@ -127,9 +129,10 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
         : [];
       const safeName = name.trim();
       const safeColor = (favouriteColor || '').trim();
+      const safeGender: 'nam' | 'nữ' = gender === 'nam' ? 'nam' : 'nữ';
 
       // Cú pháp bắt buộc theo yêu cầu:
-      // await supabase.from('profiles').update({ name, age, personalities, hobbies, favourite_color }).eq('id', user.id);
+      // await supabase.from('profiles').update({ name, age, gender, personalities, hobbies, favourite_color }).eq('id', user.id);
       const client = getSupabaseClient();
       if (client && user.id) {
         const { error: updateErr } = await client
@@ -137,6 +140,7 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
           .update({
             name: safeName,
             age: safeAge,
+            gender: safeGender,
             personalities: safePersonalities,
             hobbies: safeHobbies,
             favourite_color: safeColor,
@@ -153,6 +157,7 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
         user_id: user.id,
         name: safeName,
         age: safeAge,
+        gender: safeGender,
         personalities: safePersonalities,
         hobbies: safeHobbies,
         favourite_color: safeColor,
@@ -205,7 +210,7 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
             1. Thông Tin Cá Nhân
           </span>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <div className="space-y-1.5">
               <label htmlFor="pref-name-input" className="block text-xs font-mono uppercase tracking-wider text-[#141210]">
                 Tên / Danh Xưng <span className="text-[#8B1E1E]">*</span>
@@ -234,6 +239,21 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
                 onChange={(e) => setAge(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-[#FAF7F2] border border-[#EBE4D8] rounded-sm text-[#141210] text-xs focus:outline-none focus:border-[#8B1E1E]"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="pref-gender-select" className="block text-xs font-mono uppercase tracking-wider text-[#141210]">
+                Giới Tính
+              </label>
+              <select
+                id="pref-gender-select"
+                value={gender}
+                onChange={(e) => setGender(e.target.value as 'nam' | 'nữ')}
+                className="w-full px-3.5 py-2.5 bg-[#FAF7F2] border border-[#EBE4D8] rounded-sm text-[#141210] text-xs focus:outline-none focus:border-[#8B1E1E] cursor-pointer"
+              >
+                <option value="nữ">Nữ</option>
+                <option value="nam">Nam</option>
+              </select>
             </div>
           </div>
         </div>

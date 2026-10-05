@@ -14,7 +14,8 @@ const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Initialize Google GenAI with telemetry header
 const getGeminiClient = () => {
@@ -185,7 +186,7 @@ app.post('/api/recommend-outfit', async (req, res) => {
 TUYỆT ĐỐI KHÔNG được lạm dụng Áo Dài. Bạn PHẢI xem xét và ưu tiên gợi ý các loại trang phục đa dạng khác dựa trên tiêu chí của người dùng, bao gồm nhưng không giới hạn: Áo Tấc (cho dịp trang trọng), Áo Nhật Bình (cho hoàng tộc/sang trọng), Áo Giao Lĩnh (thời Lê/cổ điển), Áo Viên Lĩnh, Áo Tứ Thân (dân dã/hội hè Bắc Bộ), Áo Ngũ Thân tay chẽn, Yếm lụa, Áo Mớ Ba Mớ Bảy.
 
 Chỉ thị bắt buộc:
-1. Phân tích ngữ cảnh và lý do chọn lựa (ai_reasoning): Hãy phân tích sâu sắc tại sao bộ trang phục đó (như Áo Tấc, Nhật Bình, Giao Lĩnh, Viên Lĩnh, Tứ Thân, Ngũ Thân...) lại phù hợp hoàn hảo với tính chất sự kiện, không gian địa điểm, tính cách và thời tiết của người dùng thay vì chỉ chọn Áo Dài theo thói quen. CHỈ chọn Áo Dài khi tiêu chí người dùng thực sự chỉ phù hợp với Áo Dài hoặc người dùng chỉ định rõ.
+1. Phân tích ngữ cảnh và lý do chọn lựa (ai_reasoning): Hãy phân tích sâu sắc tại sao bộ trang phục đó (như Áo Bà Ba, Nhật Bình, Giao Lĩnh, Viên Lĩnh, Tứ Thân, Ngũ Thân...) lại phù hợp hoàn hảo với tính chất sự kiện, không gian địa điểm, tính cách và thời tiết của người dùng thay vì chỉ chọn Áo Dài theo thói quen. CHỈ chọn Áo Dài khi tiêu chí người dùng thực sự chỉ phù hợp với Áo Dài hoặc người dùng chỉ định rõ.
 2. outfit_id BẮT BUỘC phải là một 'id' chính xác có trong danh sách trang phục được cung cấp. Tuyệt đối không tự bịa ID.
 3. Cung cấp match_score (85-99), ai_reasoning tinh tế đậm đà văn hóa và styling_tips phụ kiện chi tiết.`;
 
@@ -219,7 +220,7 @@ ${JSON.stringify(compactCatalog, null, 2)}`;
           contents: userPrompt,
           config: {
             systemInstruction,
-            temperature: 0.35,
+            temperature: 0.8,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -354,6 +355,7 @@ app.post('/api/generate-outfit-image', async (req, res) => {
       secondary_color,
       background_vibe,
       style_notes,
+      gender = 'nữ',
     } = req.body || {};
 
     // 1. Fallback & chuẩn hóa các biến
@@ -371,8 +373,13 @@ app.post('/api/generate-outfit-image', async (req, res) => {
 
     const styleNotesText = style_notes || '';
 
+    // Xử lý danh xưng và tính từ theo giới tính
+    const isMale = gender === 'nam' || gender === 'male';
+    const pronoun = isMale ? 'He' : 'She';
+    const modelAdjective = isMale ? 'handsome male' : 'gorgeous female';
+
     // Master Prompt Template góc rộng lấy cảnh sắc nét (35mm f/8)
-    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a cute Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features Vietnamese flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. She is gracefully styled with ${accessoriesText}. She is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''} that features Vietnamese culture and traditions.`;
+    const promptText = `Photorealistic, RAW photo, Fujifilm XT4, 35mm wide-angle lens, f/8, natural cinematic lighting, wide environmental shot. Full-body wide shot of a ${modelAdjective} Vietnamese model wearing authentic traditional Vietnamese clothing: ${garment_type}. The outfit features Vietnamese flowing silk and intricate cultural patterns, meticulously crafted in ${colorScheme}. ${pronoun} is gracefully styled with ${accessoriesText}. ${pronoun} is standing gracefully in ${settingText}. The breathtaking background architecture and scenery are clearly visible, expansive, and in sharp focus. Hyperrealistic fabric texture, vivid colors, editorial high-fashion composition, 8k resolution, ultra-detailed environment${styleNotesText ? ', ' + styleNotesText : ''} that features Vietnamese culture and traditions.`;
 
     // 2. Gọi Server Colab Ngrok bằng axios (không cần Authorization)
     const response = await axios.post(
