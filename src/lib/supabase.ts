@@ -399,30 +399,8 @@ export async function updateSuggestionRating(id: string, rating: number): Promis
 // ----------------------------------------------------------------------------
 
 export async function fetchMixHistory(userId?: string): Promise<MixMatchItem[]> {
-  const client = getSupabaseClient();
-  let remoteData: MixMatchItem[] = [];
-
-  if (client) {
-    try {
-      let query = client
-        .from('mix_history')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (userId) {
-        query = query.or(`user_id.eq.${userId},user_id.is.null`);
-      }
-
-      const { data, error } = await query;
-      if (!error && data) {
-        remoteData = data as MixMatchItem[];
-      }
-    } catch (err) {
-      console.warn('Supabase fetch mix_history warning:', err);
-    }
-  }
-
-  // Also read stored local mix history for instant responsiveness
+  // Read stored local mix history for instant responsiveness and avoid Supabase PGRST205 error
+  // (table 'mix_history' is legacy/removed; the database uses 'suggestions_history' instead)
   let localData: MixMatchItem[] = [];
   try {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.MIX_HISTORY) : null;
@@ -433,20 +411,18 @@ export async function fetchMixHistory(userId?: string): Promise<MixMatchItem[]> 
     console.warn('Local mix history parse error:', e);
   }
 
-  // Merge unique by ID
-  const map = new Map<string, MixMatchItem>();
-  remoteData.forEach((item) => map.set(item.id, item));
-  localData.forEach((item) => {
-    if (!map.has(item.id)) map.set(item.id, item);
-  });
+  // Filter by user if userId provided
+  if (userId) {
+    localData = localData.filter((item) => !item.user_id || item.user_id === userId);
+  }
 
-  const merged = Array.from(map.values()).sort((a, b) => {
+  const sorted = localData.sort((a, b) => {
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     return timeB - timeA;
   });
 
-  return merged;
+  return sorted;
 }
 
 export async function saveMixHistory(
@@ -468,7 +444,7 @@ export async function saveMixHistory(
     created_at: now,
   };
 
-  // 1. Save to local storage first for resilience
+  // Save to local storage for resilience (eliminating legacy mix_history database calls causing PGRST205)
   try {
     const existingRaw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.MIX_HISTORY) : null;
     const existingList: MixMatchItem[] = existingRaw ? JSON.parse(existingRaw) : [];
@@ -476,35 +452,6 @@ export async function saveMixHistory(
     localStorage.setItem(STORAGE_KEYS.MIX_HISTORY, JSON.stringify(updatedList));
   } catch (err) {
     console.warn('Failed to save mix history locally:', err);
-  }
-
-  // 2. Save to Supabase if connected
-  const client = getSupabaseClient();
-  if (client) {
-    try {
-      const { data, error } = await client
-        .from('mix_history')
-        .insert([
-          {
-            user_id: record.user_id || null,
-            garment_type: record.garment_type,
-            accessories: record.accessories,
-            primary_color: record.primary_color,
-            secondary_color: record.secondary_color || null,
-            background_vibe: record.background_vibe || null,
-            prompt_used: record.prompt_used || null,
-            image_url: record.image_url,
-          },
-        ])
-        .select()
-        .single();
-
-      if (!error && data) {
-        return data as MixMatchItem;
-      }
-    } catch (err) {
-      console.warn('Supabase save mix_history error (falling back to local cache):', err);
-    }
   }
 
   return record;
