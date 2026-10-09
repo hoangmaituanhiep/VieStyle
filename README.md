@@ -105,12 +105,15 @@ Hệ thống kết hợp khả năng am hiểu văn hóa sâu sắc từ **Googl
 
 ## Hướng Dẫn Khởi Chạy
 
-### 1. Cài đặt thư viện
+### 1. Khởi tạo model Stable Diffusion bằng cách chạy cell trong Google Collab
+- https://colab.research.google.com/drive/1ER60qhEacQBpWwgNOQh1C4hYBIKdoRCi?usp=sharing
+
+### 2. Cài đặt thư viện
 ```bash
 npm install
 ```
 
-### 2. Thiết lập Biến Môi trường
+### 3. Thiết lập Biến Môi trường
 Tạo file `.env` từ `.env.example` và điền các khóa cần thiết:
 ```env
 GEMINI_API_KEY="your_google_gemini_api_key"
@@ -118,13 +121,13 @@ VITE_SUPABASE_URL="https://your-project.supabase.co"
 VITE_SUPABASE_ANON_KEY="your-anon-key"
 ```
 
-### 3. Chạy môi trường phát triển (Dev)
+### 4. Chạy môi trường phát triển (Dev)
 ```bash
 npm run dev
 ```
 Ứng dụng sẽ hoạt động tại `http://localhost:3000`.
 
-### 4. Build sản phẩm (Production)
+### 5. Build sản phẩm (Production)
 ```bash
 npm run build
 npm start
