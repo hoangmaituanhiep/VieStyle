@@ -106,7 +106,10 @@ Hệ thống kết hợp khả năng am hiểu văn hóa sâu sắc từ **Googl
 ## Hướng Dẫn Khởi Chạy
 
 ### 1. Khởi tạo model Stable Diffusion bằng cách chạy cell trong Google Collab
-- https://colab.research.google.com/drive/1ER60qhEacQBpWwgNOQh1C4hYBIKdoRCi?usp=sharing
+```
+ https://colab.research.google.com/drive/1ER60qhEacQBpWwgNOQh1C4hYBIKdoRCi?usp=sharing
+```
+
 
 ### 2. Cài đặt thư viện
 ```bash

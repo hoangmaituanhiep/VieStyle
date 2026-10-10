@@ -12,10 +12,13 @@ dotenv.config();
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+const cors = require('cors');
+app.use(cors);
 
 // Initialize Google GenAI with telemetry header
 const getGeminiClient = () => {
