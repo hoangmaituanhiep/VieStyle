@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from './lib/api';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
 import { MixMatchStudioView } from './components/MixMatchStudioView';
@@ -228,8 +229,8 @@ export default function App() {
       delete payload.base64Image;
       delete payload.history;
 
-      // 2. Cập nhật luồng gọi API: Truyền biến payload đã được làm sạch
-      const response = await axios.post('/api/recommend-outfit', payload);
+      // 2. Cập nhật luồng gọi API: Truyền biến payload đã được làm sạch tới Render Backend
+      const response = await axios.post(`${API_BASE_URL}/api/recommend-outfit`, payload);
       const data = response.data;
 
       const rawOutfitId = data.outfit_id || data.recommendation?.selected_outfit_id;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 import { Sparkles, Palette, Check, RefreshCw, BookmarkPlus, Download, Eye, Layers, Compass, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { MixMatchItem, UserPreferences, Outfit, normalizeOutfitArray, normalizeOutfitValue } from '../types';
 import { fetchOutfits, getSupabaseClient } from '../lib/supabase';
@@ -178,7 +179,7 @@ export const MixMatchStudioView: React.FC<MixMatchStudioViewProps> = ({
     try {
       const targetGender = profileGender || preferences?.gender || 'nữ';
 
-      const response = await axios.post('/api/generate-outfit-image', {
+      const response = await axios.post(`${API_BASE_URL}/api/generate-outfit-image`, {
         garment_type: selectedGarmentName,
         accessories: selectedAccessories,
         primary_color: selectedPrimaryColor.name,

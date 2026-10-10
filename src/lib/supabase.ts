@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient, User, Session, AuthChangeEvent } from '@supabase/supabase-js';
 import { Outfit, UserPreferences, SuggestionHistory, MixMatchItem, parseOutfitRow, parseStringOrArray } from '../types';
+import { API_BASE_URL } from './api';
 
 const STORAGE_KEYS = {
   SUPABASE_URL: 'aurastyle_supabase_url',
@@ -119,7 +120,7 @@ export async function fetchOutfits(): Promise<{ data: Outfit[] | null; error: st
   // If missing on client, attempt to sync from server proxy config
   if ((!url || !key) && typeof window !== 'undefined') {
     try {
-      const res = await fetch('/api/supabase-config');
+      const res = await fetch(`${API_BASE_URL}/api/supabase-config`);
       if (res.ok) {
         const serverConfig = await res.json();
         if (serverConfig?.url && serverConfig?.key) {

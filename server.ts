@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import path from 'path';
 import axios from 'axios';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -14,11 +15,15 @@ const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Enable CORS for Vercel and local development
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-const cors = require('cors');
-app.use(cors);
 
 // Initialize Google GenAI with telemetry header
 const getGeminiClient = () => {
